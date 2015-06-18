@@ -76,6 +76,9 @@ public:
 		ctrlRegion.bottom = -20;
 		ctrlRegion.left = -30;
 		ctrlRegion.right = 30;
+
+		//read settings
+		readSettings();
 		
 		if (mouseThreshold <= 0) mouseThreshold = 0.000001;
 		myMoveDelay = moveDelay * 10000;			//movement detection delay in nanoseconds
@@ -578,7 +581,7 @@ private:
 		bool retVal;
 
 		retVal = MoveWindow(myTarget, cursorPos.x-winCurDiff.x, cursorPos.y - winCurDiff.y, tSize.x, tSize.y, true);
-		printf("HWND:%d retVal:%d Pos:%d %d \n", myTarget, retVal, cursorPos.x - winCurDiff.x, cursorPos.y - winCurDiff.y);
+		//printf("HWND:%d retVal:%d Pos:%d %d \n", myTarget, retVal, cursorPos.x - winCurDiff.x, cursorPos.y - winCurDiff.y);
 	}
 
 	//Get handle to the window below cursor and send it to foreground
@@ -636,9 +639,98 @@ private:
 			break;
 		case 4:
 			calibrationMode = 0;
+			saveSettings();
 			printf("Calibration completed. Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
+
+			if (abs(ctrlRegion.top - ctrlRegion.bottom) < 30) {
+				printf("WARNING: Cursor might move very fast due to vertical distance being less than 30. A value of around 40 is recommended.");
+			}
+			if (abs(ctrlRegion.right - ctrlRegion.left) < 30) {
+				printf("WARNING: Cursor might move very fast due to horizontal distance being less than 40. A value of around 60 is recommended.");
+			}
 			break;
 		}
+	}
+
+	void saveSettings() {
+		
+		LONG retVal1, retVal2, retVal3;
+		HKEY hKey;
+		DWORD dwDisp;
+
+		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, &dwDisp);
+
+		retVal2 = writeFloatToReg(hKey, TEXT("scrollThreshold"), scrollThreshold);
+		retVal2 = writeFloatToReg(hKey, TEXT("mouseThreshold"), mouseThreshold);
+		retVal2 = writeFloatToReg(hKey, TEXT("curPosWeight"), curPosWeight);
+		retVal2 = RegSetValueEx(hKey, TEXT("moveDelay"), 0, REG_DWORD, (const BYTE*)&moveDelay, sizeof(moveDelay));
+
+		retVal2 = writeFloatToReg(hKey, TEXT("ctrlRegionT"), ctrlRegion.top);
+		retVal2 = writeFloatToReg(hKey, TEXT("ctrlRegionB"), ctrlRegion.bottom);
+		retVal2 = writeFloatToReg(hKey, TEXT("ctrlRegionL"), ctrlRegion.left);
+		retVal2 = writeFloatToReg(hKey, TEXT("ctrlRegionR"), ctrlRegion.right);
+
+		retVal3 = RegCloseKey(hKey);
+
+		printf("Save Settings: %d %d %d", retVal1, retVal2, retVal3);
+		
+	}
+
+	LONG writeFloatToReg(HKEY hKey, LPTSTR subkey, float value) {
+		char buffer[32];
+		_snprintf(buffer, sizeof(buffer), "%f", value);
+		return RegSetValueEx(hKey, subkey, 0, REG_SZ, (BYTE*)buffer, strlen(buffer));
+	}
+
+	void readSettings() {
+
+		LONG retVal1, retVal2, retVal3;
+		HKEY hKey;
+		DWORD dwDisp;
+
+		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKey, &dwDisp);
+
+		scrollThreshold = readFloatFromReg(hKey, TEXT("scrollThreshold"));
+		mouseThreshold = readFloatFromReg(hKey, TEXT("mouseThreshold"));
+		curPosWeight = readFloatFromReg(hKey, TEXT("curPosWeight")); 
+
+		DWORD sz = sizeof(moveDelay);
+		RegQueryValueEx(hKey, TEXT("moveDelay"), 0, 0, (BYTE*)&moveDelay, &sz);
+
+		//moveDelay = readDWORDFromReg(hKey, TEXT("moveDelay"));
+
+		ctrlRegion.top = readFloatFromReg(hKey, TEXT("ctrlRegionT"));
+		ctrlRegion.bottom = readFloatFromReg(hKey, TEXT("ctrlRegionB"));
+		ctrlRegion.left = readFloatFromReg(hKey, TEXT("ctrlRegionL"));
+		ctrlRegion.right = readFloatFromReg(hKey, TEXT("ctrlRegionR"));
+
+		retVal2 = RegCloseKey(hKey);
+
+		printf("Read Settings: %d %d %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f", 
+				retVal1, retVal2,
+				scrollThreshold, mouseThreshold, curPosWeight, moveDelay, 
+				ctrlRegion.top, ctrlRegion.bottom,ctrlRegion.left,ctrlRegion.right);
+	}
+
+	double readFloatFromReg(HKEY hKey, LPTSTR subkey){
+		char buffer[32];
+		double value = 0;
+
+		memset(buffer, 0, sizeof(buffer));
+		DWORD sz = sizeof(buffer) - 1;
+		DWORD type = 0;
+		RegQueryValueEx(hKey, subkey, 0, &type, (BYTE*)buffer, &sz);
+		if (type == REG_SZ)
+			value = atof(buffer);
+
+		return value;
+	}
+
+	DWORD readDWORDFromReg(HKEY hKey, LPTSTR subkey){
+		DWORD value=0;
+		DWORD sz = sizeof(value);
+		RegQueryValueEx(hKey, subkey, 0, 0, (BYTE*)&value, &sz);
+		return value;
 	}
 
 };
@@ -650,4 +742,30 @@ int main(int argc, char* argv[])
 	getchar();
 	return 0;
 }
+
+/*
+int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
+_In_opt_ HINSTANCE hPrevInstance,
+_In_ LPTSTR    lpCmdLine,
+_In_ int       nCmdShow)
+{
+MoveObserver* observer = new MoveObserver();
+
+//getchar();
+//return 0;
+
+MSG msg;
+HACCEL hAccelTable;
+
+// Main message loop:
+while (GetMessage(&msg, NULL, 0, 0))
+{
+TranslateMessage(&msg);
+DispatchMessage(&msg);
+}
+
+return (int)msg.wParam;
+
+}
+*/
 
