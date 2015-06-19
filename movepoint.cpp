@@ -2,7 +2,7 @@
 //
 
 #include "stdafx.h"
-#include "movepoint.h";
+#include "movepoint.h"
 
 class MoveObserver : public Move::IMoveObserver
 {
@@ -23,7 +23,8 @@ class MoveObserver : public Move::IMoveObserver
 	Move::Vec3 oldPos, curPos, avgPos;
 	Move::Quat myOrient;
 
-	ULARGE_INTEGER lHandler_FT, mouseClick_FT, crossHandler_FT, psClick_FT, keyboardClick_FT;
+	ULARGE_INTEGER lHandler_FT, mouseClick_FT, crossHandler_FT, 
+					psClick_FT, keyboardClick_FT, selectHandler_FT;
 		
 	bool controllerOn = true;
 	bool mouseMode = true;
@@ -42,10 +43,16 @@ class MoveObserver : public Move::IMoveObserver
 	RECT tRect;
 	POINT tSize;
 
+	//For console window
+	HWND myHWND;
+	WINDOWPLACEMENT myWPInfo;
+
 
 public:
 	MoveObserver()
 	{
+		hideMyself();
+
 		move = Move::createDevice();
 
 		numMoves=move->initMoves();
@@ -87,14 +94,12 @@ public:
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
 	{
-		//printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
 		moveKeyProc(keyCode, 1);
 	
 	}
 
 	void moveKeyReleased(int moveId, Move::MoveButton keyCode)
 	{
-		//printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
 		moveKeyProc(keyCode, 0);
 	}
 
@@ -258,8 +263,7 @@ private:
 				break;
 
 			case Move::B_SELECT:
-			//debug message
-				if (keyState == 1) printPos = !printPos;
+				selectHandler(keyState);
 				break;
 
 			case Move::B_START:
@@ -356,6 +360,26 @@ private:
 			else {
 				keyboardMode = false;
 				mouseMode = true;
+			}
+		}
+	}
+
+	//debug message
+	void selectHandler(byte keyState) {
+
+		if (keyState == 1){
+			//Record time when button is pressed
+			selectHandler_FT = fetchFileTime();
+		}
+		else {
+			if ((double)(fetchFileTime().QuadPart - selectHandler_FT.QuadPart) <= myScrollDelay) {
+				//Quick click is interpreted as print debug message
+				showMyself();
+				printPos = !printPos;
+			}
+			else {
+				//Long press hide console window
+				hideMyself();
 			}
 		}
 	}
@@ -577,10 +601,9 @@ private:
 
 		if (!controllerOn) return;
 
-		bool retVal;
+		BOOL retVal;
 
 		retVal = MoveWindow(myTarget, cursorPos.x-winCurDiff.x, cursorPos.y - winCurDiff.y, tSize.x, tSize.y, true);
-		//printf("HWND:%d retVal:%d Pos:%d %d \n", myTarget, retVal, cursorPos.x - winCurDiff.x, cursorPos.y - winCurDiff.y);
 	}
 
 	//Get handle to the window below cursor and send it to foreground
@@ -588,14 +611,18 @@ private:
 
 		if (GetPhysicalCursorPos(&cursorPos)) {
 
-			//RealChildWindowFromPoint gives us the best guess as to which window is relevant
-			myTarget = RealChildWindowFromPoint(GetDesktopWindow(),cursorPos);	
-			SetForegroundWindow(myTarget);
-			GetWindowRect(myTarget, &tRect);
-			tSize.x = (tRect.right - tRect.left);
+			WINDOWPLACEMENT tWPInfo;
+
+			myTarget = RealChildWindowFromPoint(GetDesktopWindow(),cursorPos);	//RealChildWindowFromPoint gives us the best guess as to which window is relevant
+			SetForegroundWindow(myTarget);										//Send target to foreground
+			GetWindowPlacement(myTarget, &tWPInfo);							//Get window placement info
+			tWPInfo.showCmd = SW_RESTORE;										//Restore size and position (if maximized)
+			SetWindowPlacement(myTarget, &tWPInfo);							//Set the new window placement info
+			GetWindowRect(myTarget, &tRect);									//Get the restored size and position
+			tSize.x = (tRect.right - tRect.left);								//Calculate distance from cursor
 			tSize.y = (tRect.bottom - tRect.top);
 
-			winCurDiff.x = cursorPos.x - tRect.left;
+			winCurDiff.x = cursorPos.x - tRect.left;							//This difference is kept while dragging
 			winCurDiff.y = cursorPos.y - tRect.top;
 
 			//printf("HWND:%d %d %d %d %d %d %d \n", myTarget, tRect.left, tRect.top, tSize.x, tSize.y, winCurDiff.x, winCurDiff.y);
@@ -616,6 +643,8 @@ private:
 
 	void calibrateRegion() {
 		
+		showMyself();
+
 		printf("Calibration started.\n");
 		calibrationMode = 1;
 		printf("Point the controller towards the top of your screen and click the move button.\n");
@@ -733,7 +762,23 @@ private:
 		return retVal;
 	}
 
+	void showMyself() {
+		myWPInfo.showCmd = SW_RESTORE;				//Restore size and position of console window
+		SetWindowPlacement(myHWND, &myWPInfo);
+	}
+
+	void hideMyself() {
+		//Hide console window
+
+		myHWND = GetConsoleWindow();
+		GetWindowPlacement(myHWND, &myWPInfo);
+		myWPInfo.showCmd = SW_HIDE;
+		SetWindowPlacement(myHWND, &myWPInfo);
+	}
+
 };
+
+
 
 int main(int argc, char* argv[])
 {
@@ -743,29 +788,4 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-/*
-int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
-_In_opt_ HINSTANCE hPrevInstance,
-_In_ LPTSTR    lpCmdLine,
-_In_ int       nCmdShow)
-{
-MoveObserver* observer = new MoveObserver();
-
-//getchar();
-//return 0;
-
-MSG msg;
-HACCEL hAccelTable;
-
-// Main message loop:
-while (GetMessage(&msg, NULL, 0, 0))
-{
-TranslateMessage(&msg);
-DispatchMessage(&msg);
-}
-
-return (int)msg.wParam;
-
-}
-*/
 
