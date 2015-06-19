@@ -1,5 +1,4 @@
 // Based on MoveFrameworkSDK
-//
 
 #include "stdafx.h"
 #include "movepoint.h"
@@ -23,8 +22,10 @@ class MoveObserver : public Move::IMoveObserver
 	Move::Vec3 oldPos, curPos, avgPos;
 	Move::Quat myOrient;
 
-	ULARGE_INTEGER lHandler_FT, mouseClick_FT, crossHandler_FT, 
-					psClick_FT, keyboardClick_FT, selectHandler_FT;
+	ULARGE_INTEGER	lHandler_FT, mouseClick_FT,
+					squareHandler_FT, crossHandler_FT, triangleHandler_FT, circleHandler_FT,
+					psClick_FT, selectHandler_FT, startHandler_FT,
+					keyboardClick_FT;
 		
 	bool controllerOn = true;
 	bool mouseMode = true;
@@ -33,18 +34,20 @@ class MoveObserver : public Move::IMoveObserver
 	bool keyboardMode = false; 
 	bool appSwitchMode = false;
 	bool zoomMode = false;
+	bool snapMode = false;
+	bool snapped = false;
 	bool printPos = false;
 	bool takeInitReading = true;
 
 	byte calibrationMode = 0;
 
 	//For drag operations
-	HWND myTarget;
+	HWND myTarget = 0;
 	RECT tRect;
 	POINT tSize;
 
 	//For console window
-	HWND myHWND;
+	HWND myHWND = 0;
 	WINDOWPLACEMENT myWPInfo;
 
 
@@ -151,6 +154,10 @@ public:
 		}
 		//Check if we are in scroll mode
 		else if (scrollMode && (double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
+			scroll(moveId);
+		}
+		//Check if we are in snap mode
+		else if (snapMode && (double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
 			scroll(moveId);
 		}
 		//Check if we are in mouse mode
@@ -384,7 +391,11 @@ private:
 		}
 	}
 
-	//Triangle maps to right click
+	/*Triangle maps to:
+		Mouse mode:		Right click
+		Keyboard mode:	Tab
+		scroll mode:	Control (to trigger zooming)
+	*/
 	void triangleHandler(byte keyState) {
 
 		if (!controllerOn) return;
@@ -403,7 +414,11 @@ private:
 		}
 	}
 
-	//Circle is middle click
+	/*Circle maps to:
+		Mouse mode:		middle click
+		Keyboard mode:	Print screen
+		scroll mode:	
+	*/
 	void circleHandler(byte keyState) {
 
 		if (!controllerOn) return;
@@ -416,25 +431,58 @@ private:
 		}
 	}
 
-	//Square maps to Alt-Tab if Button L is not pressed.
-	//Maps to Win-key otherwise.
+	/*Square maps to:
+		Mouse mode: 
+			click:		Win key
+			long-click:	show desktop
+		Keyboard mode:	Win key
+		scroll mode:	Initiate Alt-Tab. Subsequent click is Tab.
+	*/
 	void squareHandler(byte keyState) {
 
 		if (!controllerOn) return; 
-			
-		if (scrollMode) {
-			if (keyState == 1) {
-				keyPress(VK_MENU, 1);
+
+		if (keyState == 1){
+			//Record time when button is pressed
+			squareHandler_FT = fetchFileTime();
+
+			//In scroll mode, initiate Alt-Tab
+			if (scrollMode) {
 				appSwitchMode = true;
+				keyPress(VK_MENU, 1);
+				keyPress(VK_TAB, keyState);
 			}
-			keyPress(VK_TAB, keyState);
+			else  {
+				snapMode = true;
+				focusMyTarget();
+			}
 		}
 		else {
-			keyPress(VK_LWIN, keyState);
-		}	
+			if (appSwitchMode) {
+				keyPress(VK_TAB,keyState);
+			}
+			else {
+				//Quick click
+				if ((double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) <= myScrollDelay) {
+					keyboardClick(VK_LWIN);
+				}
+				//long click
+				else if (!snapped) {
+					showDesktop();
+				}
+
+				snapMode = false;
+				snapped = false;
+
+			}
+		}
 	}
 
-	//Cross button handler. Maps to long press to close app.
+	/*Cross maps to:
+		click:					Esc
+		long click:				minimize app
+		scroll mode long-click:	close app
+	*/
 	void crossHandler(byte keyState) {
 
 		if (!controllerOn) return;
@@ -445,49 +493,22 @@ private:
 		}
 		else {
 			if ((double)(fetchFileTime().QuadPart - crossHandler_FT.QuadPart) <= myScrollDelay) {
-				//Quick click is interpreted as Esc
-				keyPress(VK_ESCAPE, 1);
-				keyPress(VK_ESCAPE, 0);
+			//Quick click is interpreted as Esc
+				keyboardClick(VK_ESCAPE);
 			}
 			else {
-				closeTarget();
+			//long press
+				if (scrollMode){
+					//in scroll mode close app
+					closeTarget();
+				}
+				else {
+					//normally minimize app
+					minimizeTarget();
+				}
 			}
 		}
 	}
-
-	/* L button handler.
-	Press and hold triggers scrolling.
-	With Move button it initiates drag mode.
-	With ... button it initiates zoom mode.
-	*/
-	void lHandler(byte keyState) {
-
-		if (!controllerOn) return;
-
-		if (keyState == 1){
-			//Record time when button is pressed
-			scrollMode = true;
-			mouseMode = false;
-			lHandler_FT = fetchFileTime();
-
-			getTarget();
-		}
-		else {
-			scrollMode = false;
-			if (appSwitchMode) {
-			//Exit app-switching
-				keyPress(VK_MENU, 0);
-				appSwitchMode = false;
-				mouseMode = true;
-			}
-			/*else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
-			//*Disabled for now.** Quick click is interpreted as a middle click
-				mouseMode = true;
-				mouseClick(2);
-			}*/
-		}
-	}
-
 
 	//PS button handler. Switch the controls on and off.
 	//NOTE: PS long press CANNOT be used because the system will reset orientation.
@@ -521,7 +542,7 @@ private:
 		}
 		else if (scrollMode && keyState == 1) {
 			//Enter drag mode when L button is already pressed
-			getTarget();
+			getDragTarget();
 			scrollMode = false;
 			dragMode = true;
 		}
@@ -542,6 +563,38 @@ private:
 			else{
 				//If mouse mode is already on, send a left click
 				mousePress(1, keyState);
+			}
+		}
+	}
+
+	/* L button handler.
+		Click:					maximizes or restores app window
+		Press and hold:			triggers scrolling
+		With Move button:		triggers drag mode
+		With Triangle button:	triggers zoom mode
+	*/
+	void lHandler(byte keyState) {
+
+		if (!controllerOn) return;
+
+		if (keyState == 1){
+			//Record time when button is pressed
+			scrollMode = true;
+			lHandler_FT = fetchFileTime();
+
+			focusMyTarget();
+		}
+		else {
+			scrollMode = false;
+			if (appSwitchMode) {
+				//Exit app-switching
+				keyPress(VK_MENU, 0);
+				appSwitchMode = false;
+				mouseMode = true;
+			}
+			//Quick click maximizes or restores app window
+			else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
+				MaxRestoreTarget();		//Switch between maximized and regular app window
 			}
 		}
 	}
@@ -567,30 +620,73 @@ private:
 
 		if (!controllerOn) return;
 
-		float myThreshold = (appSwitchMode||zoomMode ? appScrollThreshold : scrollThreshold);
+		//set the desirable movement threshold
+		float myThreshold = scrollThreshold;
+		if (appSwitchMode || zoomMode) {
+			myThreshold = appScrollThreshold;
+		}
+		else if (snapMode) {
+			myThreshold = appScrollThreshold * 2;
+		}
 
 		//scroll up?
 		if (curPos.y < oldPos.y - myThreshold || curPos.y == 0) {
-			mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
+			if (snapMode) {
+				keyPress(VK_LWIN, 1);
+				keyboardClick(VK_UP);
+				keyPress(VK_LWIN, 0);
+				snapped = true;
+			}
+			else {
+				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
+				mouseMode = false;
+			}
 			//printf("MOVE id:%d   scroll up %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
 			updatePos();
 		}
 		//scroll down?
 		else if (curPos.y > oldPos.y + myThreshold || curPos.y == 1) {
-			mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+			if (snapMode) {
+				keyPress(VK_LWIN, 1);
+				keyboardClick(VK_DOWN);
+				keyPress(VK_LWIN, 0);
+				snapped = true;
+			}
+			else {
+				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+				mouseMode = false;
+			}
 			//printf("MOVE id:%d   scroll down %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
 			updatePos();
 		}
 
 		//scroll left?
 		if (curPos.x < oldPos.x - myThreshold || curPos.x == 0) {
-			mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+			if (snapMode) {
+				keyPress(VK_LWIN, 1);
+				keyboardClick(VK_LEFT);
+				keyPress(VK_LWIN, 0);
+				snapped = true;
+			}
+			else {
+				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+				mouseMode = false;
+			}
 			//printf("MOVE id:%d   scroll left %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
 			updatePos();
 		}
 		//scroll right?
 		else if (curPos.x > oldPos.x + myThreshold || curPos.x == 1) {
-			mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
+			if (snapMode) {
+				keyPress(VK_LWIN, 1);
+				keyboardClick(VK_RIGHT);
+				keyPress(VK_LWIN, 0);
+				snapped = true;
+			}
+			else {
+				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
+				mouseMode = false;
+			}
 			//printf("MOVE id:%d   scroll right  %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
 			updatePos();
 		}
@@ -607,17 +703,31 @@ private:
 	}
 
 	//Get handle to the window below cursor and send it to foreground
-	void getTarget() {
-
+	HWND getTarget() {
 		if (GetPhysicalCursorPos(&cursorPos)) {
+			return RealChildWindowFromPoint(GetDesktopWindow(), cursorPos);	//RealChildWindowFromPoint gives us the best guess as to which window is relevant	
+		}
+	}
+	
+	void focusMyTarget() {
+		WINDOWPLACEMENT tWPInfo;
+		myTarget = getTarget();
 
-			WINDOWPLACEMENT tWPInfo;
-
-			myTarget = RealChildWindowFromPoint(GetDesktopWindow(),cursorPos);	//RealChildWindowFromPoint gives us the best guess as to which window is relevant
+		if (myTarget != NULL) {
 			SetForegroundWindow(myTarget);										//Send target to foreground
-			GetWindowPlacement(myTarget, &tWPInfo);							//Get window placement info
+		}
+	}
+
+	void getDragTarget() {
+		
+		WINDOWPLACEMENT tWPInfo;
+		myTarget = getTarget();
+
+		if (myTarget != NULL) {
+			SetForegroundWindow(myTarget);										//Send target to foreground
+			GetWindowPlacement(myTarget, &tWPInfo);								//Get window placement info
 			tWPInfo.showCmd = SW_RESTORE;										//Restore size and position (if maximized)
-			SetWindowPlacement(myTarget, &tWPInfo);							//Set the new window placement info
+			SetWindowPlacement(myTarget, &tWPInfo);								//Set the new window placement info
 			GetWindowRect(myTarget, &tRect);									//Get the restored size and position
 			tSize.x = (tRect.right - tRect.left);								//Calculate distance from cursor
 			tSize.y = (tRect.bottom - tRect.top);
@@ -631,14 +741,59 @@ private:
 	}
 
 	void closeTarget() {
-		HWND cTarget;
-		
-		if (GetPhysicalCursorPos(&cursorPos)) {
-			cTarget = RealChildWindowFromPoint(GetDesktopWindow(), cursorPos);
+		HWND cTarget = getTarget();
+		if (cTarget!=NULL) {
 			//Cannot use SendMessage because the thread will stop processing signals from controller
 			PostMessage(cTarget, WM_CLOSE, 0, 0);	
 		}
+	}
 
+	BOOL minimizeTarget() {
+		WINDOWPLACEMENT tWPInfo;
+		HWND cTarget = getTarget();
+		if (cTarget != NULL) {
+			return setShowCMD(cTarget, &tWPInfo, SW_MINIMIZE);
+		}
+	}
+
+	BOOL maximizeTarget() {
+		WINDOWPLACEMENT tWPInfo;
+		HWND cTarget = getTarget();
+		if (cTarget != NULL) {
+			return setShowCMD(cTarget, &tWPInfo, SW_MAXIMIZE);
+		}
+	}
+
+	BOOL restoreTarget() {
+		WINDOWPLACEMENT tWPInfo;
+		HWND cTarget = getTarget();
+		if (cTarget != NULL) {
+			return setShowCMD(cTarget, &tWPInfo, SW_RESTORE);
+		}
+	}
+
+	BOOL setShowCMD(HWND tHandle, WINDOWPLACEMENT * ptWP, UINT showCMD) {
+		if (GetWindowPlacement(tHandle, ptWP)) {				//Get window placement info
+			(*ptWP).showCmd = showCMD;							//set showCMD value
+			return SetWindowPlacement(tHandle, ptWP);			//Set the new window placement info
+		}
+	}
+
+	BOOL MaxRestoreTarget() {
+		WINDOWPLACEMENT tWPInfo;
+		HWND cTarget = getTarget();
+		if (cTarget != NULL) {
+			if (GetWindowPlacement(cTarget, &tWPInfo)) {
+				tWPInfo.showCmd = (tWPInfo.showCmd == SW_MAXIMIZE ? SW_RESTORE : SW_MAXIMIZE);
+				return SetWindowPlacement(cTarget, &tWPInfo);
+			}
+		}
+	}
+
+	void showDesktop() {
+		keyPress(VK_LWIN, 1);
+		keyboardClick(68);		//'D'
+		keyPress(VK_LWIN, 0);
 	}
 
 	void calibrateRegion() {
@@ -701,7 +856,7 @@ private:
 
 		retVal3 = RegCloseKey(hKey);
 
-		printf("Save Settings: %d %d %d", retVal1, retVal2, retVal3);
+		printf("Save Settings: %d %d %d \n", retVal1, retVal2, retVal3);
 		
 	}
 
@@ -732,7 +887,7 @@ private:
 
 		retVal3 = RegCloseKey(hKey);
 
-		printf("Read Settings: %d %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f", 
+		printf("Read Settings: %d %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f \n", 
 				retVal1, retVal2, retVal3,
 				scrollThreshold, appScrollThreshold, mouseThreshold, curPosWeight, moveDelay, 
 				ctrlRegion.top, ctrlRegion.bottom,ctrlRegion.left,ctrlRegion.right);
@@ -744,10 +899,10 @@ private:
 		LONG retVal;
 		char buffer[32];
 		
-		memset(buffer, 0, sizeof(buffer));
-		DWORD sz = sizeof(buffer) - 1;
+		DWORD sz = sizeof(buffer);
 		DWORD type = 0;
 		retVal = RegQueryValueEx(hKey, subkey, 0, &type, (BYTE*)buffer, &sz);
+		
 		if (retVal==ERROR_SUCCESS && type == REG_SZ)
 			*vp = atof(buffer);
 		return retVal;
@@ -762,18 +917,16 @@ private:
 		return retVal;
 	}
 
-	void showMyself() {
-		myWPInfo.showCmd = SW_RESTORE;				//Restore size and position of console window
-		SetWindowPlacement(myHWND, &myWPInfo);
+	//Restore size and position of console window
+	BOOL showMyself() {
+		myHWND = (myHWND == NULL ? GetConsoleWindow() : myHWND);
+		return setShowCMD(myHWND, &myWPInfo, SW_RESTORE);
 	}
 
-	void hideMyself() {
-		//Hide console window
-
-		myHWND = GetConsoleWindow();
-		GetWindowPlacement(myHWND, &myWPInfo);
-		myWPInfo.showCmd = SW_HIDE;
-		SetWindowPlacement(myHWND, &myWPInfo);
+	//Hide console window
+	BOOL hideMyself() {
+		myHWND = (myHWND==NULL ? GetConsoleWindow() : myHWND);
+		return setShowCMD(myHWND, &myWPInfo, SW_HIDE);
 	}
 
 };
