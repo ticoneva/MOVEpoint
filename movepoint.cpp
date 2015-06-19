@@ -7,7 +7,8 @@
 class MoveObserver : public Move::IMoveObserver
 {
 	//Default values
-	float scrollThreshold = 0.01;		//Threshold of movement before scrolling begins
+	float scrollThreshold = 0.02;		//Threshold of movement before scrolling begins
+	float appScrollThreshold = 0.1;		//Threshold of movement before scrolling begins in app-switching and zooming
 	float mouseThreshold = 0.005;		//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
 	float curPosWeight = 0.4;			//Weight of current handset position in calculating moving average. For reducing cursor jitter.
 	int moveDelay = 200;				//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
@@ -15,7 +16,6 @@ class MoveObserver : public Move::IMoveObserver
 	//variables and objects
 	Move::IMoveManager* move;
 	int numMoves, myMoveDelay, myScrollDelay;
-	float appScrollThreshold;
 
 	RECT screenSize;
 	RECTf ctrlRegion;
@@ -83,8 +83,6 @@ public:
 		if (mouseThreshold <= 0) mouseThreshold = 0.000001;
 		myMoveDelay = moveDelay * 10000;			//movement detection delay in nanoseconds
 		myScrollDelay = (moveDelay + 100) * 10000;	//scroll needs slightly more delay
-		appScrollThreshold = scrollThreshold * 10;	//app-switching scroll needs to be slower
-
 	}
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
@@ -434,9 +432,10 @@ private:
 	}
 
 	/* L button handler.
-	L button on its own triggers middle click. 
 	Press and hold triggers scrolling.
-	With Move button it initiates drag mode. */
+	With Move button it initiates drag mode.
+	With ... button it initiates zoom mode.
+	*/
 	void lHandler(byte keyState) {
 
 		if (!controllerOn) return;
@@ -457,11 +456,11 @@ private:
 				appSwitchMode = false;
 				mouseMode = true;
 			}
-			else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
-			//Quick click is interpreted as a middle click
+			/*else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
+			//*Disabled for now.** Quick click is interpreted as a middle click
 				mouseMode = true;
 				mouseClick(2);
-			}
+			}*/
 		}
 	}
 
@@ -544,7 +543,7 @@ private:
 
 		if (!controllerOn) return;
 
-		float myThreshold = (appSwitchMode ? appScrollThreshold : scrollThreshold);
+		float myThreshold = (appSwitchMode||zoomMode ? appScrollThreshold : scrollThreshold);
 
 		//scroll up?
 		if (curPos.y < oldPos.y - myThreshold || curPos.y == 0) {
@@ -661,6 +660,7 @@ private:
 		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, &dwDisp);
 
 		retVal2 = writeFloatToReg(hKey, TEXT("scrollThreshold"), scrollThreshold);
+		retVal2 = writeFloatToReg(hKey, TEXT("appScrollThreshold"), appScrollThreshold);
 		retVal2 = writeFloatToReg(hKey, TEXT("mouseThreshold"), mouseThreshold);
 		retVal2 = writeFloatToReg(hKey, TEXT("curPosWeight"), curPosWeight);
 		retVal2 = RegSetValueEx(hKey, TEXT("moveDelay"), 0, REG_DWORD, (const BYTE*)&moveDelay, sizeof(moveDelay));
@@ -690,47 +690,47 @@ private:
 
 		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKey, &dwDisp);
 
-		scrollThreshold = readFloatFromReg(hKey, TEXT("scrollThreshold"));
-		mouseThreshold = readFloatFromReg(hKey, TEXT("mouseThreshold"));
-		curPosWeight = readFloatFromReg(hKey, TEXT("curPosWeight")); 
+		readFloatFromReg(hKey, TEXT("scrollThreshold"), &scrollThreshold);
+		readFloatFromReg(hKey, TEXT("appScrollThreshold"), &appScrollThreshold);
+		readFloatFromReg(hKey, TEXT("mouseThreshold"), &mouseThreshold);
+		readFloatFromReg(hKey, TEXT("curPosWeight"), &curPosWeight);
+		readFloatFromReg(hKey, TEXT("ctrlRegionT"), &ctrlRegion.top);
+		readFloatFromReg(hKey, TEXT("ctrlRegionB"), &ctrlRegion.bottom);
+		readFloatFromReg(hKey, TEXT("ctrlRegionL"), &ctrlRegion.left);
+		retVal2 = readFloatFromReg(hKey, TEXT("ctrlRegionR"), &ctrlRegion.right);
 
-		DWORD sz = sizeof(moveDelay);
-		RegQueryValueEx(hKey, TEXT("moveDelay"), 0, 0, (BYTE*)&moveDelay, &sz);
+		readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay);
 
-		//moveDelay = readDWORDFromReg(hKey, TEXT("moveDelay"));
+		retVal3 = RegCloseKey(hKey);
 
-		ctrlRegion.top = readFloatFromReg(hKey, TEXT("ctrlRegionT"));
-		ctrlRegion.bottom = readFloatFromReg(hKey, TEXT("ctrlRegionB"));
-		ctrlRegion.left = readFloatFromReg(hKey, TEXT("ctrlRegionL"));
-		ctrlRegion.right = readFloatFromReg(hKey, TEXT("ctrlRegionR"));
-
-		retVal2 = RegCloseKey(hKey);
-
-		printf("Read Settings: %d %d %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f", 
-				retVal1, retVal2,
-				scrollThreshold, mouseThreshold, curPosWeight, moveDelay, 
+		printf("Read Settings: %d %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f", 
+				retVal1, retVal2, retVal3,
+				scrollThreshold, appScrollThreshold, mouseThreshold, curPosWeight, moveDelay, 
 				ctrlRegion.top, ctrlRegion.bottom,ctrlRegion.left,ctrlRegion.right);
 	}
 
-	double readFloatFromReg(HKEY hKey, LPTSTR subkey){
-		char buffer[32];
-		double value = 0;
+	LONG readFloatFromReg(HKEY hKey, LPTSTR subkey, float * vp){
+	//Only overwrite settings if it's available in registry.
 
+		LONG retVal;
+		char buffer[32];
+		
 		memset(buffer, 0, sizeof(buffer));
 		DWORD sz = sizeof(buffer) - 1;
 		DWORD type = 0;
-		RegQueryValueEx(hKey, subkey, 0, &type, (BYTE*)buffer, &sz);
-		if (type == REG_SZ)
-			value = atof(buffer);
-
-		return value;
+		retVal = RegQueryValueEx(hKey, subkey, 0, &type, (BYTE*)buffer, &sz);
+		if (retVal==ERROR_SUCCESS && type == REG_SZ)
+			*vp = atof(buffer);
+		return retVal;
 	}
 
-	DWORD readDWORDFromReg(HKEY hKey, LPTSTR subkey){
-		DWORD value=0;
-		DWORD sz = sizeof(value);
-		RegQueryValueEx(hKey, subkey, 0, 0, (BYTE*)&value, &sz);
-		return value;
+	DWORD readDWORDFromReg(HKEY hKey, LPTSTR subkey, DWORD * vp){
+		LONG retVal;
+		DWORD sz = sizeof(*vp);
+
+		retVal = RegQueryValueEx(hKey, subkey, 0, 0, (BYTE*)vp, &sz);
+		
+		return retVal;
 	}
 
 };
