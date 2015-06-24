@@ -17,11 +17,12 @@ class MoveObserver : public Move::IMoveObserver
 	int numMoves;
 
 	//Settings
-	float scrollThreshold;
-	float appScrollThreshold;
-	float mouseThreshold;
-	float curPosWeight;
-	int moveDelay, myMoveDelay, myScrollDelay;
+	float scrollThreshold = 0.02;
+	float appScrollThreshold = 0.1;
+	float mouseThreshold = 0.005;
+	float curPosWeight = 0.4;
+	int moveDelay = 200; 
+	int myMoveDelay, myScrollDelay;
 
 	//Position
 	RECT screenSize;
@@ -51,8 +52,7 @@ class MoveObserver : public Move::IMoveObserver
 	//Status
 	bool snapped = false;
 	bool targetClosed = false; 
-	bool startMenuShown = false;
-
+	
 	bool squarePressed = false;
 	bool crossPressed = false;
 	bool trianglePressed = false;
@@ -91,12 +91,14 @@ public:
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
 	{
+		printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
 		moveKeyProc(keyCode, 1);
 	
 	}
 
 	void moveKeyReleased(int moveId, Move::MoveButton keyCode)
 	{
+		printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
 		moveKeyProc(keyCode, 0);
 	}
 
@@ -406,7 +408,7 @@ private:
 			else  {
 			//Long press square alone enables snap mode and show desktop.
 				snapMode = true;
-				focusMyTarget();
+				myTarget = getTarget();
 			}
 		}
 		else {
@@ -430,8 +432,7 @@ private:
 				}
 				//Quick click
 				else {
-					if (!startMenuShown) keyboardClick(VK_LWIN);
-					startMenuShown = !startMenuShown;
+					keyboardClick(VK_LWIN);
 				}
 
 				snapMode = false;
@@ -686,6 +687,9 @@ private:
 		//scroll up?
 		if (curPos.y < oldPos.y - myThreshold || curPos.y == 0) {
 			if (snapMode) {
+				if (myTarget != NULL) {
+					SetForegroundWindow(myTarget);	//target was acquired with square button press
+				}
 				keyPress(VK_LWIN, 1);
 				keyboardClick(VK_UP);
 				keyPress(VK_LWIN, 0);
@@ -763,10 +767,8 @@ private:
 		}
 	}
 	
-	void focusMyTarget() {
-		WINDOWPLACEMENT tWPInfo;
-		myTarget = getTarget();
-
+	void focusMyTarget(HWND inTarget=NULL) {
+		myTarget = (inTarget!=NULL ? inTarget : getTarget());
 		if (myTarget != NULL) {
 			SetForegroundWindow(myTarget);										//Send target to foreground
 		}
@@ -925,7 +927,7 @@ private:
 		appScrollThreshold = appScrollThreshold_d;
 		mouseThreshold = mouseThreshold_d;
 		curPosWeight = curPosWeight_d;
-		moveDelay = moveDelay;
+		moveDelay = moveDelay_d;
 
 		calSettings();
 	}
@@ -982,9 +984,9 @@ private:
 		readFloatFromReg(hKey, TEXT("ctrlRegionT"), &ctrlRegion.top);
 		readFloatFromReg(hKey, TEXT("ctrlRegionB"), &ctrlRegion.bottom);
 		readFloatFromReg(hKey, TEXT("ctrlRegionL"), &ctrlRegion.left);
-		retVal2 = readFloatFromReg(hKey, TEXT("ctrlRegionR"), &ctrlRegion.right);
+		readFloatFromReg(hKey, TEXT("ctrlRegionR"), &ctrlRegion.right);
 
-		readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay);
+		retVal2 = readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay);
 
 		retVal3 = RegCloseKey(hKey);
 
