@@ -42,6 +42,7 @@ class MoveObserver : public Move::IMoveObserver
 	bool mouseMode = true;
 	bool scrollMode = false;
 	bool dragMode = false;
+	bool dragMode2 = false;
 	bool keyboardMode = false; 
 	bool appSwitchMode = false;
 	bool appSwitchMode2 = false;
@@ -57,6 +58,8 @@ class MoveObserver : public Move::IMoveObserver
 	bool crossPressed = false;
 	bool trianglePressed = false;
 	bool circlePressed = false;
+	bool movePressed = false;
+	bool LPressed = false; 
 		
 	bool printPos = false;
 	bool takeInitReading = true;
@@ -140,14 +143,14 @@ public:
 				scroll(moveId);
 			}
 			//Check if we are in mouse mode
-			else if ((mouseMode || dragMode) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
+			else if ((mouseMode || dragMode || dragMode2) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
 				if (tiltMode) {
 					moveCursorTilt(moveId, data);
 				}
 				else {
 					moveCursor(moveId);
 				}
-				if (dragMode) {
+				if (dragMode || dragMode2) {
 					dragWindow(moveId);
 				}
 			}
@@ -547,6 +550,12 @@ private:
 			//Exit drag mode when Move button is released
 			dragMode = false;
 			mouseMode = true;
+			
+		}
+		else if (dragMode2 && keyState == 0) {
+			dragMode2 = false;
+			mouseMode = true;
+			mousePress(1, 0);
 		}
 		else if (keyboardMode) {
 			//In keyboard mode, send an enter signal
@@ -559,6 +568,7 @@ private:
 			}
 			else{
 				//If mouse mode is already on, send a left click
+				movePressed = (keyState == 1 ? true : false);
 				mousePress(1, keyState);
 			}
 		}
@@ -583,6 +593,12 @@ private:
 				snapMode = false;		//disable snapping 
 				keyPress(VK_MENU, 1);
 				keyPress(VK_TAB, keyState);
+			}
+			else if (movePressed) {
+				//enter drag mode with move button pressed first
+				getDragTarget();
+				scrollMode = false;
+				dragMode2 = true;
 			}
 			else if (!crossPressed) {
 				//otherwise enter scrollMode
