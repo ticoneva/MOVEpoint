@@ -6,36 +6,58 @@
 class MoveObserver : public Move::IMoveObserver
 {
 	//Default values
-	float scrollThreshold = 0.02;		//Threshold of movement before scrolling begins
-	float appScrollThreshold = 0.1;		//Threshold of movement before scrolling begins in app-switching and zooming
-	float mouseThreshold = 0.005;		//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
-	float curPosWeight = 0.4;			//Weight of current handset position in calculating moving average. For reducing cursor jitter.
-	int moveDelay = 200;				//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
+	const float scrollThreshold_d = 0.02;		//Threshold of movement before scrolling begins
+	const float appScrollThreshold_d = 0.1;		//Threshold of movement before scrolling begins in app-switching and zooming
+	const float mouseThreshold_d = 0.005;		//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
+	const float curPosWeight_d = 0.4;			//Weight of current handset position in calculating moving average. For reducing cursor jitter.
+	const int moveDelay_d = 200;				//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
 	
 	//variables and objects
 	Move::IMoveManager* move;
-	int numMoves, myMoveDelay, myScrollDelay;
+	int numMoves;
 
+	//Settings
+	float scrollThreshold;
+	float appScrollThreshold;
+	float mouseThreshold;
+	float curPosWeight;
+	int moveDelay, myMoveDelay, myScrollDelay;
+
+	//Position
 	RECT screenSize;
-	RECTf ctrlRegion;
+	RECTf ctrlRegion, ctrlRegion_d;
 	POINT cursorPos, winCurDiff;
 	Move::Vec3 oldPos, curPos, avgPos;
-	Move::Quat myOrient;
+	Move::Quat avgOrient;
 
-	ULARGE_INTEGER	lHandler_FT, mouseClick_FT,
+	//Timers
+	ULARGE_INTEGER	cur_FT,
+					lHandler_FT, mouseClick_FT, keyboardClick_FT,
 					squareHandler_FT, crossHandler_FT, triangleHandler_FT, circleHandler_FT,
-					psClick_FT, selectHandler_FT, startHandler_FT,
-					keyboardClick_FT;
-		
+					psClick_FT, selectHandler_FT, startHandler_FT;
+	
+	//Modes
 	bool controllerOn = true;
 	bool mouseMode = true;
 	bool scrollMode = false;
 	bool dragMode = false;
 	bool keyboardMode = false; 
 	bool appSwitchMode = false;
+	bool appSwitchMode2 = false;
 	bool zoomMode = false;
 	bool snapMode = false;
+	bool tiltMode = false;
+
+	//Status
 	bool snapped = false;
+	bool targetClosed = false; 
+	bool startMenuShown = false;
+
+	bool squarePressed = false;
+	bool crossPressed = false;
+	bool trianglePressed = false;
+	bool circlePressed = false;
+		
 	bool printPos = false;
 	bool takeInitReading = true;
 
@@ -54,45 +76,17 @@ class MoveObserver : public Move::IMoveObserver
 public:
 	MoveObserver()
 	{
-		hideMyself();
+		setupConsole();					//setting up the console window
 
 		move = Move::createDevice();
-
+		pairNewMoves();					//This pairs any unpaired controllers via USB
 		numMoves=move->initMoves();
-		move->initCamera(numMoves);
-
+		initCamera();					//Do we have camera?
 		move->subsribe(this);
 		
-		screenSize.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-		screenSize.right = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-		screenSize.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-		screenSize.bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-
-		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n", 
-			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
-
-		//initial values
-		oldPos.x = -99999;
-		oldPos.y = -99999;
-		oldPos.z = -99999;
-		curPos.x = 0;
-		curPos.y = 0;
-		curPos.z = 0;
-		avgPos.x = 0;
-		avgPos.y = 0;
-		avgPos.z = 0;
-
-		ctrlRegion.top = 20;
-		ctrlRegion.bottom = -20;
-		ctrlRegion.left = -30;
-		ctrlRegion.right = 30;
-
-		//read settings
-		readSettings();
-		
-		if (mouseThreshold <= 0) mouseThreshold = 0.000001;
-		myMoveDelay = moveDelay * 10000;			//movement detection delay in nanoseconds
-		myScrollDelay = (moveDelay + 100) * 10000;	//scroll needs slightly more delay
+		initValues();					//intial values for variables
+		restoreDefaults();				//default settings
+		readSettings();					//read settings from registry
 	}
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
@@ -122,89 +116,47 @@ public:
 		//Update previous position
 		if (oldPos.x < -10000) oldPos.x = curPos.x;
 		if (oldPos.y < -10000) oldPos.y = curPos.y;
-		float oWeight = 0.99;
-		myOrient.w = oWeight * myOrient.w + (1 - oWeight) * data.orientation.w;
-		myOrient.v.x = oWeight * myOrient.v.x + (1 - oWeight) * data.orientation.v.x;
-		myOrient.v.y = oWeight * myOrient.v.y + (1 - oWeight) * data.orientation.v.y;
-		myOrient.v.z = oWeight * myOrient.v.z + (1 - oWeight) * data.orientation.v.z;
 
 		if (takeInitReading) {
-			myOrient.w = data.orientation.w;
-			myOrient.v.x = data.orientation.v.x;
-			myOrient.v.y = data.orientation.v.y;
-			myOrient.v.z = data.orientation.v.z;
-			takeInitReading = false;
+			takeInitOrient(data);
 		}
 		
+		//Check if we are in calibration mode
 		if (calibrationMode > 0) {
-			switch (calibrationMode){
-				case 1:
-					ctrlRegion.top = data.position.y;
-					break;
-				case 2:
-					ctrlRegion.bottom = data.position.y;
-					break;
-				case 3:
-					ctrlRegion.left = data.position.x;
-					break;
-				case 4:
-					ctrlRegion.right = data.position.x;
-					break;
-			}
+			calibrateRecordPos(data);
 		}
-		//Check if we are in scroll mode
-		else if (scrollMode && (double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
-			scroll(moveId);
-		}
-		//Check if we are in snap mode
-		else if (snapMode && (double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-			scroll(moveId);
-		}
-		//Check if we are in mouse mode
-		else if ((mouseMode || dragMode) && (double)(fetchFileTime().QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
-			moveCursor(moveId);
-			if (dragMode) {
-				dragWindow(moveId);
+		else if (scrollMode || snapMode || mouseMode || dragMode || keyboardMode) {
+
+			cur_FT = fetchFileTime();
+
+			//Check if we are in scroll mode
+			if (scrollMode && (double)(cur_FT.QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
+				scroll(moveId);
 			}
-		} 
-		else if (keyboardMode && (double)(fetchFileTime().QuadPart -keyboardClick_FT.QuadPart) > myMoveDelay) {
-		/*keyboard uses a very slow moving average to determine what's the untilted position is. 
-		  Not ideal but haven't figure out what would be a better solution.*/
-			if (data.orientation.v.y - myOrient.v.y > 0.15) {
-				keyboardClick(VK_LEFT);
+			//Check if we are in snap mode
+			else if (snapMode && (double)(cur_FT.QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
+				scroll(moveId);
 			}
-			else if (data.orientation.v.y - myOrient.v.y < -0.15) {
-				keyboardClick(VK_RIGHT);
+			//Check if we are in mouse mode
+			else if ((mouseMode || dragMode) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
+				if (tiltMode) {
+					moveCursorTilt(moveId, data);
+				}
+				else {
+					moveCursor(moveId);
+				}
+				if (dragMode) {
+					dragWindow(moveId);
+				}
 			}
-			
-			if (data.orientation.v.x - myOrient.v.x > 0.15) {
-				keyboardClick(VK_UP);
+			else if (keyboardMode && (double)(cur_FT.QuadPart - keyboardClick_FT.QuadPart) > myMoveDelay) {
+				moveArrows(moveId, data);
 			}
-			else if (data.orientation.v.x - myOrient.v.x < -0.15) {
-				keyboardClick(VK_DOWN);
-			}
-			keyboardClick_FT = fetchFileTime();
 		}
 				
 		//Print position information
 		if (printPos) {
-			printf("MOVE id:%d   pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f   trigger:%d\n",
-				moveId,
-				data.position.x, data.position.y, data.position.z,
-				data.orientation.w, data.orientation.v.x, data.orientation.v.y, data.orientation.v.z,
-				data.trigger);
-			printf("AVG id:%d   pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f   trigger:%d\n",
-				moveId,
-				curPos.x, curPos.y, curPos.z,
-				myOrient.w, myOrient.v.x, myOrient.v.y, myOrient.v.z,
-				data.trigger);
-			if (GetPhysicalCursorPos(&cursorPos)) {
-				printf("CURSOR pos:%d %d\n", cursorPos.x, cursorPos.y);				
-			}
-			//printf("TIME %d \n", fetchFileTime().QuadPart / 10000);
-			//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, curPos.x, avgPos.y, curPos.y);
-			printPos = false; 
-			
+			printDebugMessage(moveId, data);
 		}
 
 	}
@@ -325,15 +277,12 @@ private:
 		switch (button) {
 			case 1:
 				myMButton = (keyState == 1 ? MOUSEEVENTF_LEFTDOWN: MOUSEEVENTF_LEFTUP);
-				//printf("Left press. Time:%d \n", fetchFileTime().QuadPart/10000);
 				break;
 			case 2:
 				myMButton = (keyState == 1 ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
-				//printf("Middle press. Time:%d \n", fetchFileTime().QuadPart / 10000);
 				break;
 			case 3:
 				myMButton = (keyState == 1 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
-				//printf("Right press. Time:%d \n", fetchFileTime().QuadPart / 10000);
 				break;
 		}
 
@@ -360,9 +309,11 @@ private:
 		if (!controllerOn) return;
 
 		if (keyState == 1) {
-			if (!keyboardMode) {
+			if (!tiltMode) {
 				keyboardMode = true;
 				mouseMode = false;
+				printf("To use tilt mode or keyboard mode the controller's orientation must be calibrated.\n");
+				printf("Please point the controller towards the screen and press the PS button for 2 seconds.\n");
 			}
 			else {
 				keyboardMode = false;
@@ -379,14 +330,14 @@ private:
 			selectHandler_FT = fetchFileTime();
 		}
 		else {
-			if ((double)(fetchFileTime().QuadPart - selectHandler_FT.QuadPart) <= myScrollDelay) {
+			if ((double)(fetchFileTime().QuadPart - selectHandler_FT.QuadPart) > myScrollDelay) {
+				//Long press hide console window
+				hideMyself();
+			}
+			else {
 				//Quick click is interpreted as print debug message
 				showMyself();
 				printPos = !printPos;
-			}
-			else {
-				//Long press hide console window
-				hideMyself();
 			}
 		}
 	}
@@ -443,8 +394,8 @@ private:
 		if (!controllerOn) return; 
 
 		if (keyState == 1){
-			//Record time when button is pressed
-			squareHandler_FT = fetchFileTime();
+			squarePressed = true;
+			squareHandler_FT = fetchFileTime();	//Record time when button is pressed
 
 			//In scroll mode, initiate Alt-Tab
 			if (scrollMode) {
@@ -453,22 +404,34 @@ private:
 				keyPress(VK_TAB, keyState);
 			}
 			else  {
+			//Long press square alone enables snap mode and show desktop.
 				snapMode = true;
 				focusMyTarget();
 			}
 		}
 		else {
+			squarePressed = false;
+
 			if (appSwitchMode) {
-				keyPress(VK_TAB,keyState);
+				//if we entered app switching with L button holding first, release tab
+				keyPress(VK_TAB, keyState);
+			} 
+			else if (appSwitchMode2) {
+				//if we entered app switching with square button holding first, release Alt
+				keyPress(VK_MENU, keyState);
+				appSwitchMode2 = false;
+				mouseMode = true;
 			}
 			else {
-				//Quick click
-				if ((double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) <= myScrollDelay) {
-					keyboardClick(VK_LWIN);
+				//Long click
+				if ((double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
+					if (!snapped) showDesktop();	//if a snap hasn't occured, show desktop
+					
 				}
-				//long click
-				else if (!snapped) {
-					showDesktop();
+				//Quick click
+				else {
+					if (!startMenuShown) keyboardClick(VK_LWIN);
+					startMenuShown = !startMenuShown;
 				}
 
 				snapMode = false;
@@ -488,23 +451,35 @@ private:
 		if (!controllerOn) return;
 
 		if (keyState == 1){
-			//Record time when button is pressed
-			crossHandler_FT = fetchFileTime();
+			crossPressed = true;
+			crossHandler_FT = fetchFileTime();	//Record time when button is pressed
 		}
 		else {
-			if ((double)(fetchFileTime().QuadPart - crossHandler_FT.QuadPart) <= myScrollDelay) {
-			//Quick click is interpreted as Esc
-				keyboardClick(VK_ESCAPE);
-			}
-			else {
-			//long press
+			crossPressed = false;
+
+			if ((double)(fetchFileTime().QuadPart - crossHandler_FT.QuadPart) > myScrollDelay) {
+				//long press
 				if (scrollMode){
 					//in scroll mode close app
 					closeTarget();
 				}
+				else if (targetClosed) {
+					//If we closed a window, don't minimize the next one
+					targetClosed = false;
+				}
 				else {
 					//normally minimize app
 					minimizeTarget();
+				}
+			}
+			else {
+				if (calibrationMode > 0) {
+					calibrationMode = 0;
+					printf("Calibration canceled. \n");
+				}
+				else {
+					//Quick click is interpreted as Esc
+					keyboardClick(VK_ESCAPE);
 				}
 			}
 		}
@@ -517,14 +492,35 @@ private:
 			psClick_FT = fetchFileTime();
 		}
 		else {
-			if ((double)(fetchFileTime().QuadPart - psClick_FT.QuadPart) <= myScrollDelay) {
-			//Quick click is interpreted as turning controller on or off
-				controllerOn = !controllerOn;
-				if (controllerOn) mouseMode = true;
+			if ((double)(fetchFileTime().QuadPart - psClick_FT.QuadPart) > myScrollDelay) {
+				//Long click starts calibration mode or restore defaults
+				if (calibrationMode > 0) {
+					restoreDefaults();
+					saveSettings();
+					printf("Default values restored. \n");
+					calibrationMode = 0;
+				}
+				else {
+					takeInitReading = true;
+					if (controllerOn) calibrateRegion();
+				}
 			}
 			else {
-				takeInitReading = true;
-				if (controllerOn) calibrateRegion();
+				//Quick click is interpreted as turning controller on or off
+				controllerOn = !controllerOn;
+				if (controllerOn) { 
+					mouseMode = true;
+					/* Can't use because close actions don't do anything
+					move->initMoves();
+					initCamera();
+					*/
+				}
+				else {
+					/*These doesn't seem to do anything
+					move->closeCamera();
+					move->closeMoves();
+					*/
+				}
 			}
 		}
 	}
@@ -578,45 +574,103 @@ private:
 		if (!controllerOn) return;
 
 		if (keyState == 1){
-			//Record time when button is pressed
-			scrollMode = true;
-			lHandler_FT = fetchFileTime();
+			lHandler_FT = fetchFileTime(); //Record time when button is pressed
 
-			focusMyTarget();
+			if (squarePressed) {
+				//app-switching if square is pressed first
+				appSwitchMode2 = true;	
+				snapMode = false;		//disable snapping 
+				keyPress(VK_MENU, 1);
+				keyPress(VK_TAB, keyState);
+			}
+			else if (!crossPressed) {
+				//otherwise enter scrollMode
+				scrollMode = true;
+				focusMyTarget();
+			}
 		}
 		else {
 			scrollMode = false;
 			if (appSwitchMode) {
-				//Exit app-switching
+				//Exit app-switching (if L is pressed first)
 				keyPress(VK_MENU, 0);
 				appSwitchMode = false;
 				mouseMode = true;
 			}
-			//Quick click maximizes or restores app window
+			else if (crossPressed) {
+				closeTarget();
+			}
+			else if (appSwitchMode2){
+				//app-switching if square is pressed first
+				keyPress(VK_TAB, keyState);
+			}
+			//Quick click maximizes or restores app window. 
 			else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
-				MaxRestoreTarget();		//Switch between maximized and regular app window
+					MaxRestoreTarget();		//Switch between maximized and regular app window
 			}
 		}
 	}
 
+	//Move arrow keys
+	void moveArrows(int moveId, Move::MoveData data) {
+		/*keyboard mode requires calibration everytime because default orientation seems to change
+		with each startup */
+		if (data.orientation.v.y - avgOrient.v.y > 0.15) {
+			keyboardClick(VK_LEFT);
+		}
+		else if (data.orientation.v.y - avgOrient.v.y < -0.15) {
+			keyboardClick(VK_RIGHT);
+		}
+
+		if (data.orientation.v.x - avgOrient.v.x > 0.15) {
+			keyboardClick(VK_UP);
+		}
+		else if (data.orientation.v.x - avgOrient.v.x < -0.15) {
+			keyboardClick(VK_DOWN);
+		}
+		keyboardClick_FT = fetchFileTime();
+	}
+
 	//Move cursor subroutine
-	void moveCursor(int moveId) {
+	void moveCursor(int moveId=0) {
 
 		if (!controllerOn) return;
 
 		float xPosWeight, yPosWeight;
 
-		xPosWeight = min(abs(curPos.x - avgPos.x) / mouseThreshold,1);
-		yPosWeight = min(abs(curPos.y - avgPos.y) / mouseThreshold,1);
-		
+		xPosWeight = min(abs(curPos.x - avgPos.x) / mouseThreshold, 1);
+		yPosWeight = min(abs(curPos.y - avgPos.y) / mouseThreshold, 1);
+
 		cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPos.x * screenSize.right + screenSize.left));
-		cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPos.y * screenSize.bottom + screenSize.top));
+		cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPos.y * screenSize.bottom + screenSize.top)); 
+
+		SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+	}
+
+	//Move cursor subroutine
+	void moveCursorTilt(int moveId, Move::MoveData data) {
+
+		if (!controllerOn) return;
+
+		if (data.orientation.v.y - avgOrient.v.y > 0.2) {
+			cursorPos.x = cursorPos.x - 2;
+		}
+		else if (data.orientation.v.y - avgOrient.v.y < -0.2) {
+			cursorPos.x = cursorPos.x + 2;
+		}
+
+		if (data.orientation.v.x - avgOrient.v.x > 0.2) {
+			cursorPos.y = cursorPos.y - 2;
+		}
+		else if (data.orientation.v.x - avgOrient.v.x < -0.2) {
+			cursorPos.y = cursorPos.y + 2;
+		}
 
 		SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
 	}
 
 	//Scrolling subroutine
-	void scroll(int moveId) {
+	void scroll(int moveId=0) {
 
 		if (!controllerOn) return;
 
@@ -693,7 +747,7 @@ private:
 	}
 
 	//Drag subroutine
-	void dragWindow(int moveId) {
+	void dragWindow(int moveId=0) {
 
 		if (!controllerOn) return;
 
@@ -745,6 +799,7 @@ private:
 		if (cTarget!=NULL) {
 			//Cannot use SendMessage because the thread will stop processing signals from controller
 			PostMessage(cTarget, WM_CLOSE, 0, 0);	
+			targetClosed = true;
 		}
 	}
 
@@ -800,27 +855,31 @@ private:
 		
 		showMyself();
 
-		printf("Calibration started.\n");
+		printf("Orientation calibrated.\n");
+		printf("Click the move button to continue calibration of screen area. Click X to quit.\n");
 		calibrationMode = 1;
-		printf("Point the controller towards the top of your screen and click the move button.\n");
-		
 	}
 
 	void showCalibrationSteps() {
 		switch (calibrationMode) {
 		case 1:
 			calibrationMode++;
-			printf("Point the controller towards the bottom of your screen and click the move button.\n");
+			printf("To restore default values for all settings long click PS button again anytime during calibration. \n");
+			printf("Point the controller towards the top of your screen and click the move button.\n");
 			break;
 		case 2:
 			calibrationMode++;
-			printf("Point the controller towards the left side of your screen and click the move button.\n");
+			printf("Point the controller towards the bottom of your screen and click the move button.\n");
 			break;
 		case 3:
 			calibrationMode++;
-			printf("Point the controller towards the right side of your screen and click the move button.\n");
+			printf("Point the controller towards the left side of your screen and click the move button.\n");
 			break;
 		case 4:
+			calibrationMode++;
+			printf("Point the controller towards the right side of your screen and click the move button.\n");
+			break;
+		case 5:
 			calibrationMode = 0;
 			saveSettings();
 			printf("Calibration completed. Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
@@ -833,6 +892,48 @@ private:
 			}
 			break;
 		}
+	}
+
+	void calibrateRecordPos(Move::MoveData data){
+		switch (calibrationMode){
+		case 2:
+			ctrlRegion.top = data.position.y;
+			break;
+		case 3:
+			ctrlRegion.bottom = data.position.y;
+			break;
+		case 4:
+			ctrlRegion.left = data.position.x;
+			break;
+		case 5:
+			ctrlRegion.right = data.position.x;
+			break;
+		}
+	}
+	
+	void takeInitOrient(Move::MoveData data) {
+		avgOrient.w = data.orientation.w;
+		avgOrient.v.x = data.orientation.v.x;
+		avgOrient.v.y = data.orientation.v.y;
+		avgOrient.v.z = data.orientation.v.z;
+		takeInitReading = false;
+	}
+
+	void restoreDefaults() {
+		ctrlRegion = ctrlRegion_d;
+		scrollThreshold = scrollThreshold_d;
+		appScrollThreshold = appScrollThreshold_d;
+		mouseThreshold = mouseThreshold_d;
+		curPosWeight = curPosWeight_d;
+		moveDelay = moveDelay;
+
+		calSettings();
+	}
+
+	void calSettings() {
+		if (mouseThreshold <= 0) mouseThreshold = 0.000001;
+		myMoveDelay = moveDelay * 10000;						//movement detection delay in nanoseconds
+		myScrollDelay = (moveDelay + 100) * 10000;				//scroll needs slightly more delay
 	}
 
 	void saveSettings() {
@@ -856,7 +957,7 @@ private:
 
 		retVal3 = RegCloseKey(hKey);
 
-		printf("Save Settings: %d %d %d \n", retVal1, retVal2, retVal3);
+		printf("Save Settings. Return value: %d %d %d \n", retVal1, retVal2, retVal3);
 		
 	}
 
@@ -886,6 +987,8 @@ private:
 		readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay);
 
 		retVal3 = RegCloseKey(hKey);
+
+		calSettings();
 
 		printf("Read Settings: %d %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f \n", 
 				retVal1, retVal2, retVal3,
@@ -917,6 +1020,28 @@ private:
 		return retVal;
 	}
 
+	void initValues() {
+		screenSize.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+		screenSize.right = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+		screenSize.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+		screenSize.bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+		oldPos.x = -99999;
+		oldPos.y = -99999;
+		oldPos.z = -99999;
+		curPos.x = 0;
+		curPos.y = 0;
+		curPos.z = 0;
+		avgPos.x = 0;
+		avgPos.y = 0;
+		avgPos.z = 0;
+
+		ctrlRegion_d.top = 20;
+		ctrlRegion_d.bottom = -20;
+		ctrlRegion_d.left = -30;
+		ctrlRegion_d.right = 30;
+	}
+
 	//Restore size and position of console window
 	BOOL showMyself() {
 		myHWND = (myHWND == NULL ? GetConsoleWindow() : myHWND);
@@ -927,6 +1052,51 @@ private:
 	BOOL hideMyself() {
 		myHWND = (myHWND==NULL ? GetConsoleWindow() : myHWND);
 		return setShowCMD(myHWND, &myWPInfo, SW_HIDE);
+	}
+
+	void setupConsole() {
+		//Only show console window in debug build
+		#ifdef NDEBUG
+				hideMyself();
+		#endif
+		printf("Press [SELECT] to show or hide console. \n", numMoves);
+	}
+
+	void pairNewMoves() {
+		numMoves = move->pairMoves();
+		if (numMoves > 0) {
+			showMyself();
+			printf("%d controller(s) paired. \n", numMoves);
+			printf("Please pair the controller(s) in your Bluetooth settings.\n");
+		}
+	}
+
+	void initCamera() {
+		//Do we have camera?
+		if (!move->initCamera(numMoves)) {
+			showMyself();
+			printf("No PS Eye Camera found. \n", numMoves);
+			tiltMode = true;
+		}
+	}
+
+	void printDebugMessage(int moveId, Move::MoveData data) {
+		printf("MOVE id:%d   pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f   trigger:%d\n",
+			moveId,
+			data.position.x, data.position.y, data.position.z,
+			data.orientation.w, data.orientation.v.x, data.orientation.v.y, data.orientation.v.z,
+			data.trigger);
+		printf("AVG NORMALIZED pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f\n",
+			avgPos.x, avgPos.y, avgPos.z,
+			avgOrient.w, avgOrient.v.x, avgOrient.v.y, avgOrient.v.z);
+		if (GetPhysicalCursorPos(&cursorPos)) {
+			printf("CURSOR pos:%d %d\n", cursorPos.x, cursorPos.y);
+		}
+		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n",
+			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
+		//printf("TIME %d \n", fetchFileTime().QuadPart / 10000);
+		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, curPos.x, avgPos.y, curPos.y);
+		printPos = false;
 	}
 
 };
