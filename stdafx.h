@@ -9,6 +9,7 @@
 #include <tchar.h>
 #include <math.h>
 #include "windows.h"
+#include <VersionHelpers.h>
 
 #include "IMoveManager.h"
 #include "MoveFactory.h"
