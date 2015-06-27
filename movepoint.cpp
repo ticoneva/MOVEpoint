@@ -12,9 +12,9 @@ class MoveObserver : public Move::IMoveObserver
 	int numMoves;
 
 	//Settings
-	float scrollThreshold = 0.02;
-	float appScrollThreshold = 0.1;
-	float mouseThreshold = 0.005;
+	float scrollThreshold = 1;
+	float appScrollThreshold = 5;
+	float mouseThreshold = 0.2;
 	float curPosWeight = 0.4;
 	int moveDelay = 200; 
 	int myMoveDelay, myScrollDelay;
@@ -23,7 +23,7 @@ class MoveObserver : public Move::IMoveObserver
 	RECT screenSize;
 	RECTf ctrlRegion, ctrlRegion_d;
 	POINT cursorPos, winCurDiff;
-	Move::Vec3 oldPos, curPos, avgPos;
+	Move::Vec3 oldPos, curPosNorm, avgPos;
 	Move::Quat avgOrient;
 
 	//Timers
@@ -110,18 +110,18 @@ public:
 	{
 		
 		//Update position info
-		curPos.x = max(min((data.position.x - ctrlRegion.left) / (ctrlRegion.right - ctrlRegion.left), 1), 0);
-		curPos.y = (1 - max(min((data.position.y - ctrlRegion.bottom) / (ctrlRegion.top - ctrlRegion.bottom), 1), 0));
-		curPos.z = data.position.z;
+		curPosNorm.x = max(min((data.position.x - ctrlRegion.left) / (ctrlRegion.right - ctrlRegion.left), 1), 0);
+		curPosNorm.y = (1 - max(min((data.position.y - ctrlRegion.bottom) / (ctrlRegion.top - ctrlRegion.bottom), 1), 0));
+		curPosNorm.z = data.position.z;
 
 		//Update moving average
-		avgPos.x = curPosWeight * curPos.x + (1 - curPosWeight) * avgPos.x;
-		avgPos.y = curPosWeight * curPos.y + (1 - curPosWeight) * avgPos.y;
-		avgPos.z = curPosWeight * curPos.z + (1 - curPosWeight) * avgPos.z;
+		avgPos.x = curPosWeight * data.position.x + (1 - curPosWeight) * avgPos.x;
+		avgPos.y = curPosWeight * data.position.y + (1 - curPosWeight) * avgPos.y;
+		avgPos.z = curPosWeight * data.position.z + (1 - curPosWeight) * avgPos.z;
 
 		//Update previous position
-		if (oldPos.x < -10000) oldPos.x = curPos.x;
-		if (oldPos.y < -10000) oldPos.y = curPos.y;
+		if (oldPos.x < -10000) oldPos.x = data.position.x;
+		if (oldPos.y < -10000) oldPos.y = data.position.y;
 
 		if (takeInitReading) {
 			takeInitOrient(data);
@@ -137,20 +137,15 @@ public:
 
 			//Check if we are in scroll mode
 			if (scrollMode && (double)(cur_FT.QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId);
+				scroll(moveId,data);
 			}
 			//Check if we are in snap mode
 			else if (snapMode && (double)(cur_FT.QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId);
+				scroll(moveId,data);
 			}
 			//Check if we are in mouse mode
 			else if ((mouseMode || dragMode || dragMode2) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
-				if (tiltMode) {
-					moveCursorTilt(moveId, data);
-				}
-				else {
-					moveCursor(moveId);
-				}
+				moveCursor(moveId, data);
 				if (dragMode || dragMode2) {
 					dragWindow(moveId);
 				}
@@ -183,11 +178,11 @@ public:
 	}
 
 private:
-	void updatePos()
+	void updatePos(Move::MoveData data)
 	{
-		oldPos.x = curPos.x;
-		oldPos.y = curPos.y;
-		oldPos.z = curPos.z;
+		oldPos.x = data.position.x;
+		oldPos.y = data.position.y;
+		oldPos.z = data.position.z;
 	}
 
 	ULARGE_INTEGER fetchFileTime()
@@ -677,20 +672,26 @@ private:
 	}
 
 	//Move cursor subroutine
-	void moveCursor(int moveId=0) {
+	void moveCursor(int moveId, Move::MoveData data) {
 
 		if (!controllerOn) return;
 
-		Move::Vec3 curPosNorm, avgPosNorm;
 		float xPosWeight, yPosWeight;
 
-		xPosWeight = min(fabs(curPos.x - avgPos.x) / mouseThreshold, 1);
-		yPosWeight = min(fabs(curPos.y - avgPos.y) / mouseThreshold, 1);
+		if (!tiltMode) {
 
-		cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPos.x * screenSize.right + screenSize.left));
-		cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPos.y * screenSize.bottom + screenSize.top)); 
+			xPosWeight = min(fabs(data.position.x - avgPos.x) / mouseThreshold, 1);
+			yPosWeight = min(fabs(data.position.y - avgPos.y) / mouseThreshold, 1);
 
-		SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+			cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPosNorm.x * screenSize.right + screenSize.left));
+			cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPosNorm.y * screenSize.bottom + screenSize.top));
+
+			SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+
+		}
+		else {
+			moveCursorTilt(moveId, data);
+		}
 	}
 
 	//Move cursor by tilt subroutine
@@ -716,7 +717,7 @@ private:
 	}
 
 	//Scrolling subroutine
-	void scroll(int moveId=0) {
+	void scroll(int moveId, Move::MoveData data) {
 
 		if (!controllerOn) return;
 
@@ -730,7 +731,7 @@ private:
 		}
 
 		//scroll up?
-		if (curPos.y < oldPos.y - myThreshold || curPos.y == 0) {
+		if (data.position.y > oldPos.y + myThreshold || data.position.y == 1) {
 			if (snapMode) {
 				snap(VK_UP);
 			}
@@ -738,11 +739,10 @@ private:
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll up %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
-			updatePos();
+			updatePos(data);
 		}
 		//scroll down?
-		else if (curPos.y > oldPos.y + myThreshold || curPos.y == 1) {
+		else if (data.position.y < oldPos.y - myThreshold || data.position.y == 0) {
 			if (snapMode) {
 				snap(VK_DOWN);
 			}
@@ -750,12 +750,11 @@ private:
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll down %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
-			updatePos();
+			updatePos(data);
 		}
 
 		//scroll left?
-		if (curPos.x < oldPos.x - myThreshold || curPos.x == 0) {
+		if (data.position.x < oldPos.x - myThreshold || data.position.x == 0) {
 			if (snapMode) {
 				snap(VK_LEFT);
 			}
@@ -766,11 +765,10 @@ private:
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll left %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
-			updatePos();
+			updatePos(data);
 		}
 		//scroll right?
-		else if (curPos.x > oldPos.x + myThreshold || curPos.x == 1) {
+		else if (data.position.x > oldPos.x + myThreshold || data.position.x == 1) {
 			if (snapMode) {
 				snap(VK_RIGHT);
 			}
@@ -781,8 +779,7 @@ private:
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll right  %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
-			updatePos();
+			updatePos(data);
 		}
 	}
 
@@ -1180,9 +1177,9 @@ private:
 		oldPos.x = -99999;
 		oldPos.y = -99999;
 		oldPos.z = -99999;
-		curPos.x = 0;
-		curPos.y = 0;
-		curPos.z = 0;
+		curPosNorm.x = 0;
+		curPosNorm.y = 0;
+		curPosNorm.z = 0;
 		avgPos.x = 0;
 		avgPos.y = 0;
 		avgPos.z = 0;
@@ -1251,7 +1248,7 @@ private:
 		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n",
 			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
 		//printf("TIME %d \n", fetchFileTime().QuadPart / 10000);
-		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, curPos.x, avgPos.y, curPos.y);
+		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, data.position.x, avgPos.y, data.position.y);
 		printPos = false;
 	}
 
