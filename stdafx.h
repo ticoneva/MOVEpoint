@@ -8,7 +8,13 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <math.h>
-#include "windows.h"
+#include <windows.h>
+#include <WinUser.h>
+
+#include <VersionHelpers.h>
+#include <Dbt.h>
+
+#include "resource.h"
 
 #include "IMoveManager.h"
 #include "MoveFactory.h"

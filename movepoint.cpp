@@ -3,23 +3,18 @@
 #include "stdafx.h"
 #include "movepoint.h"
 
+using namespace movepoint;
+
 class MoveObserver : public Move::IMoveObserver
 {
-	//Default values
-	const float scrollThreshold_d = 0.02;		//Threshold of movement before scrolling begins
-	const float appScrollThreshold_d = 0.1;		//Threshold of movement before scrolling begins in app-switching and zooming
-	const float mouseThreshold_d = 0.005;		//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
-	const float curPosWeight_d = 0.4;			//Weight of current handset position in calculating moving average. For reducing cursor jitter.
-	const int moveDelay_d = 200;				//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
-	
 	//variables and objects
 	Move::IMoveManager* move;
 	int numMoves;
 
 	//Settings
-	float scrollThreshold = 0.02;
-	float appScrollThreshold = 0.1;
-	float mouseThreshold = 0.005;
+	float scrollThreshold = 1;
+	float appScrollThreshold = 5;
+	float mouseThreshold = 0.2;
 	float curPosWeight = 0.4;
 	int moveDelay = 200; 
 	int myMoveDelay, myScrollDelay;
@@ -28,7 +23,7 @@ class MoveObserver : public Move::IMoveObserver
 	RECT screenSize;
 	RECTf ctrlRegion, ctrlRegion_d;
 	POINT cursorPos, winCurDiff;
-	Move::Vec3 oldPos, curPos, avgPos;
+	Move::Vec3 oldPos, curPosNorm, avgPos;
 	Move::Quat avgOrient;
 
 	//Timers
@@ -49,9 +44,10 @@ class MoveObserver : public Move::IMoveObserver
 	bool zoomMode = false;
 	bool snapMode = false;
 	bool tiltMode = false;
+	bool desktopMode = false;
 
 	//Status
-	bool snapped = false;
+	snapStatus snapped = SNAP_NONE;
 	bool targetClosed = false; 
 	
 	bool squarePressed = false;
@@ -64,6 +60,7 @@ class MoveObserver : public Move::IMoveObserver
 	bool printPos = false;
 	bool takeInitReading = true;
 
+	long hasSystemSettings = false;
 	byte calibrationMode = 0;
 
 	//For drag operations
@@ -81,46 +78,86 @@ public:
 	{
 		setupConsole();					//setting up the console window
 
-		move = Move::createDevice();
-		pairNewMoves();					//This pairs any unpaired controllers via USB
-		numMoves=move->initMoves();
-		initCamera();					//Do we have camera?
-		move->subsribe(this);
-		
 		initValues();					//intial values for variables
 		restoreDefaults();				//default settings
 		readSettings();					//read settings from registry
+
+		move = Move::createDevice();
+		pairNewMoves();					//This pairs any unpaired controllers via USB
+		initializeSystem();
+		
+	}
+
+	int getNumMoves() {
+		return move->getMoveCount();
+	}
+
+	void pairNewMoves() {
+		numMoves = move->pairMoves();
+		if (numMoves > 0) {
+			showMyself();
+			printf("%d controller(s) paired. \n", numMoves);
+			printf("Please pair the controller(s) in your Bluetooth settings.\n");
+		}
+	}
+
+	void initializeSystem() {
+		numMoves = move->initMoves();
+		if (numMoves > 0) {
+			initCamera();					//Do we have camera?
+			move->subsribe(this);
+		}
+		else {
+			closeTarget(myHWND);
+		}
+	}
+
+	void terminateSystem() {
+		//For testing purpose. None of these really do anything.
+		//Seems like the only way to terminate is to terminate the whole process.
+
+		if (numMoves > 0) {
+			move->unsubsribe(this);
+			move->closeCamera();
+		}
+		move->closeMoves();
+		delete move;			//<--This would throw an exception
+		move = nullptr;
 	}
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
 	{
-		printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
+		#ifdef DEBUG
+			printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
+		#endif
 		moveKeyProc(keyCode, 1);
 	
 	}
 
 	void moveKeyReleased(int moveId, Move::MoveButton keyCode)
 	{
-		printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
+		#ifdef DEBUG
+			printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
+		#endif
 		moveKeyProc(keyCode, 0);
 	}
 
 	void moveUpdated(int moveId, Move::MoveData data)
 	{
-		
+
 		//Update position info
-		curPos.x = max(min((data.position.x - ctrlRegion.left) / (ctrlRegion.right - ctrlRegion.left), 1), 0);
-		curPos.y = (1 - max(min((data.position.y - ctrlRegion.bottom) / (ctrlRegion.top - ctrlRegion.bottom), 1), 0));
-		curPos.z = data.position.z;
+		curPosNorm.x = max(min((data.position.x - ctrlRegion.left) / (ctrlRegion.right - ctrlRegion.left), 1), 0);
+		curPosNorm.y = (1 - max(min((data.position.y - ctrlRegion.bottom) / (ctrlRegion.top - ctrlRegion.bottom), 1), 0));
+		curPosNorm.z = data.position.z;
 
 		//Update moving average
-		avgPos.x = curPosWeight * curPos.x + (1 - curPosWeight) * avgPos.x;
-		avgPos.y = curPosWeight * curPos.y + (1 - curPosWeight) * avgPos.y;
-		avgPos.z = curPosWeight * curPos.z + (1 - curPosWeight) * avgPos.z;
+		avgPos.x = curPosWeight * data.position.x + (1 - curPosWeight) * avgPos.x;
+		avgPos.y = curPosWeight * data.position.y + (1 - curPosWeight) * avgPos.y;
+		avgPos.z = curPosWeight * data.position.z + (1 - curPosWeight) * avgPos.z;
 
 		//Update previous position
-		if (oldPos.x < -10000) oldPos.x = curPos.x;
-		if (oldPos.y < -10000) oldPos.y = curPos.y;
+		if (oldPos.x < -10000) oldPos.x = data.position.x;
+		if (oldPos.y < -10000) oldPos.y = data.position.y;
 
 		if (takeInitReading) {
 			takeInitOrient(data);
@@ -136,20 +173,15 @@ public:
 
 			//Check if we are in scroll mode
 			if (scrollMode && (double)(cur_FT.QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId);
+				scroll(moveId,data);
 			}
 			//Check if we are in snap mode
 			else if (snapMode && (double)(cur_FT.QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId);
+				scroll(moveId,data);
 			}
 			//Check if we are in mouse mode
 			else if ((mouseMode || dragMode || dragMode2) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
-				if (tiltMode) {
-					moveCursorTilt(moveId, data);
-				}
-				else {
-					moveCursor(moveId);
-				}
+				moveCursor(moveId, data);
 				if (dragMode || dragMode2) {
 					dragWindow(moveId);
 				}
@@ -182,11 +214,11 @@ public:
 	}
 
 private:
-	void updatePos()
+	void updatePos(Move::MoveData data)
 	{
-		oldPos.x = curPos.x;
-		oldPos.y = curPos.y;
-		oldPos.z = curPos.z;
+		oldPos.x = data.position.x;
+		oldPos.y = data.position.y;
+		oldPos.z = data.position.z;
 	}
 
 	ULARGE_INTEGER fetchFileTime()
@@ -379,6 +411,22 @@ private:
 
 		if (!controllerOn) return;
 
+		if (keyState == 1) {
+			circlePressed = true;
+			circleHandler_FT = fetchFileTime();	//Record time when button is pressed
+		}
+		else {
+			//Long click
+			if ((double)(fetchFileTime().QuadPart - circleHandler_FT.QuadPart) > myScrollDelay) {
+				if (snapped==SNAP_NONE) {
+
+				}
+			}
+			else {
+
+			}
+		}
+
 		if (mouseMode) {
 			mousePress(2, keyState);
 		}
@@ -390,7 +438,7 @@ private:
 	/*Square maps to:
 		Mouse mode: 
 			click:		Win key
-			long-click:	show desktop
+			long-click:	show desktop/new desktop (Win10)
 		Keyboard mode:	Win key
 		scroll mode:	Initiate Alt-Tab. Subsequent click is Tab.
 	*/
@@ -430,8 +478,14 @@ private:
 			else {
 				//Long click
 				if ((double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-					if (!snapped) showDesktop();	//if a snap hasn't occured, show desktop
-					
+					if (snapped==SNAP_NONE) {
+						if (IsWindows10OrGreater) {
+							newDesktop();
+						}
+						else {
+							showDesktop();	//if a snap hasn't occured, show desktop
+						}
+					}
 				}
 				//Quick click
 				else {
@@ -439,7 +493,7 @@ private:
 				}
 
 				snapMode = false;
-				snapped = false;
+				snapped = SNAP_NONE;
 
 			}
 		}
@@ -457,6 +511,11 @@ private:
 		if (keyState == 1){
 			crossPressed = true;
 			crossHandler_FT = fetchFileTime();	//Record time when button is pressed
+			if (squarePressed) {
+				//If square button is pressed, try closing current desktop (only works in Windows 10)
+				killDesktop();
+				snapped = SNAP_CLOSE;
+			}
 		}
 		else {
 			crossPressed = false;
@@ -649,22 +708,29 @@ private:
 	}
 
 	//Move cursor subroutine
-	void moveCursor(int moveId=0) {
+	void moveCursor(int moveId, Move::MoveData data) {
 
 		if (!controllerOn) return;
 
 		float xPosWeight, yPosWeight;
 
-		xPosWeight = min(abs(curPos.x - avgPos.x) / mouseThreshold, 1);
-		yPosWeight = min(abs(curPos.y - avgPos.y) / mouseThreshold, 1);
+		if (!tiltMode) {
 
-		cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPos.x * screenSize.right + screenSize.left));
-		cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPos.y * screenSize.bottom + screenSize.top)); 
+			xPosWeight = min(fabs(data.position.x - avgPos.x) / mouseThreshold, 1);
+			yPosWeight = min(fabs(data.position.y - avgPos.y) / mouseThreshold, 1);
 
-		SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+			cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPosNorm.x * screenSize.right + screenSize.left));
+			cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPosNorm.y * screenSize.bottom + screenSize.top));
+
+			SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+
+		}
+		else {
+			moveCursorTilt(moveId, data);
+		}
 	}
 
-	//Move cursor subroutine
+	//Move cursor by tilt subroutine
 	void moveCursorTilt(int moveId, Move::MoveData data) {
 
 		if (!controllerOn) return;
@@ -687,7 +753,7 @@ private:
 	}
 
 	//Scrolling subroutine
-	void scroll(int moveId=0) {
+	void scroll(int moveId, Move::MoveData data) {
 
 		if (!controllerOn) return;
 
@@ -697,73 +763,93 @@ private:
 			myThreshold = appScrollThreshold;
 		}
 		else if (snapMode) {
-			myThreshold = appScrollThreshold * 2;
+			myThreshold = appScrollThreshold * 1.5;
 		}
 
 		//scroll up?
-		if (curPos.y < oldPos.y - myThreshold || curPos.y == 0) {
+		if (data.position.y > oldPos.y + myThreshold || data.position.y == 1) {
 			if (snapMode) {
-				if (myTarget != NULL) {
-					SetForegroundWindow(myTarget);	//target was acquired with square button press
-				}
-				keyPress(VK_LWIN, 1);
-				keyboardClick(VK_UP);
-				keyPress(VK_LWIN, 0);
-				snapped = true;
+				snap(VK_UP);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll up %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
-			updatePos();
+			updatePos(data);
 		}
 		//scroll down?
-		else if (curPos.y > oldPos.y + myThreshold || curPos.y == 1) {
+		else if (data.position.y < oldPos.y - myThreshold || data.position.y == 0) {
 			if (snapMode) {
-				keyPress(VK_LWIN, 1);
-				keyboardClick(VK_DOWN);
-				keyPress(VK_LWIN, 0);
-				snapped = true;
+				snap(VK_DOWN);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll down %.3f %.3f %.3f \n", moveId, oldPos.y, curPos.y);
-			updatePos();
+			updatePos(data);
 		}
 
 		//scroll left?
-		if (curPos.x < oldPos.x - myThreshold || curPos.x == 0) {
+		if (data.position.x < oldPos.x - myThreshold || data.position.x == 0) {
 			if (snapMode) {
-				keyPress(VK_LWIN, 1);
-				keyboardClick(VK_LEFT);
-				keyPress(VK_LWIN, 0);
-				snapped = true;
+				snap(VK_LEFT);
+			}
+			else if (desktopMode) {
+				lastDesktop();
 			}
 			else {
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll left %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
-			updatePos();
+			updatePos(data);
 		}
 		//scroll right?
-		else if (curPos.x > oldPos.x + myThreshold || curPos.x == 1) {
+		else if (data.position.x > oldPos.x + myThreshold || data.position.x == 1) {
 			if (snapMode) {
-				keyPress(VK_LWIN, 1);
-				keyboardClick(VK_RIGHT);
-				keyPress(VK_LWIN, 0);
-				snapped = true;
+				snap(VK_RIGHT);
+			}
+			else if (desktopMode) {
+				nextDesktop();
 			}
 			else {
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
 				mouseMode = false;
 			}
-			//printf("MOVE id:%d   scroll right  %.3f %.3f %.3f \n", moveId, oldPos.x, curPos.x);
-			updatePos();
+			updatePos(data);
 		}
+	}
+
+	void snap(int keyCode) {
+
+		//Have we already snapped in this direction?
+		switch (keyCode) {
+			case VK_UP:
+				if (snapped == SNAP_UP) return ;
+				snapped = SNAP_UP;
+				printf("Snapping up. \n");
+				break;
+			case VK_DOWN:
+				if (snapped == SNAP_DOWN) return;
+				snapped = SNAP_DOWN;
+				printf("Snapping down. \n");
+				break;
+			case VK_LEFT:
+				if (snapped == SNAP_LEFT) return;
+				snapped = SNAP_LEFT;
+				printf("Snapping left. \n");
+				break;
+			case VK_RIGHT:
+				if (snapped == SNAP_RIGHT) return;
+				snapped = SNAP_RIGHT;
+				printf("Snapping right. \n");
+				break;
+		}
+
+		SetForegroundWindow(myTarget);	//target was acquired with square button press
+		keyPress(VK_LWIN, 1);
+		keyboardClick(keyCode);
+		keyPress(VK_LWIN, 0);
+
 	}
 
 	//Drag subroutine
@@ -812,8 +898,8 @@ private:
 
 	}
 
-	void closeTarget() {
-		HWND cTarget = getTarget();
+	void closeTarget(HWND cTarget = NULL) {
+		cTarget = (cTarget == NULL ? getTarget() : cTarget);
 		if (cTarget!=NULL) {
 			//Cannot use SendMessage because the thread will stop processing signals from controller
 			PostMessage(cTarget, WM_CLOSE, 0, 0);	
@@ -821,26 +907,31 @@ private:
 		}
 	}
 
-	BOOL minimizeTarget() {
+	BOOL minimizeTarget(HWND cTarget = NULL) {
 		WINDOWPLACEMENT tWPInfo;
-		HWND cTarget = getTarget();
+		
+		cTarget = (cTarget == NULL ? getTarget() : cTarget);
+
 		if (cTarget != NULL) {
+			printf("Windw minimized \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_MINIMIZE);
 		}
 	}
 
-	BOOL maximizeTarget() {
+	BOOL maximizeTarget(HWND cTarget = NULL) {
 		WINDOWPLACEMENT tWPInfo;
-		HWND cTarget = getTarget();
+		cTarget = (cTarget == NULL ? getTarget() : cTarget);
 		if (cTarget != NULL) {
+			printf("Windw maximized. \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_MAXIMIZE);
 		}
 	}
 
-	BOOL restoreTarget() {
+	BOOL restoreTarget(HWND cTarget = NULL) {
 		WINDOWPLACEMENT tWPInfo;
-		HWND cTarget = getTarget();
+		cTarget = (cTarget == NULL ? getTarget() : cTarget);
 		if (cTarget != NULL) {
+			printf("Windw restored. \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_RESTORE);
 		}
 	}
@@ -857,6 +948,7 @@ private:
 		HWND cTarget = getTarget();
 		if (cTarget != NULL) {
 			if (GetWindowPlacement(cTarget, &tWPInfo)) {
+				printf("Window resized. \n");
 				tWPInfo.showCmd = (tWPInfo.showCmd == SW_MAXIMIZE ? SW_RESTORE : SW_MAXIMIZE);
 				return SetWindowPlacement(cTarget, &tWPInfo);
 			}
@@ -866,6 +958,48 @@ private:
 	void showDesktop() {
 		keyPress(VK_LWIN, 1);
 		keyboardClick(68);		//'D'
+		keyPress(VK_LWIN, 0);
+
+		printf("Desktop shown. \n");
+	}
+
+	//only works for Windows 10
+	void newDesktop() {
+		keyPress(VK_LWIN, 1);
+		keyPress(VK_CONTROL, 1);
+		keyboardClick(68);		//'D'
+		keyPress(VK_CONTROL, 0);
+		keyPress(VK_LWIN, 0);
+
+		printf("Desktop created. \n");
+	}
+
+	//only works for Windows 10
+	void killDesktop() {
+		keyPress(VK_LWIN, 1);
+		keyPress(VK_CONTROL, 1);
+		keyboardClick(VK_F4);
+		keyPress(VK_CONTROL, 0);
+		keyPress(VK_LWIN, 0);
+
+		printf("Desktop deleted. \n");
+	}
+
+	//only works for Windows 10
+	void lastDesktop() {
+		keyPress(VK_LWIN, 1);
+		keyPress(VK_CONTROL, 1);
+		keyboardClick(VK_LEFT);		
+		keyPress(VK_CONTROL, 0);
+		keyPress(VK_LWIN, 0);
+	}
+
+	//only works for Windows 10
+	void nextDesktop() {
+		keyPress(VK_LWIN, 1);
+		keyPress(VK_CONTROL, 1);
+		keyboardClick(VK_RIGHT);
+		keyPress(VK_CONTROL, 0);
 		keyPress(VK_LWIN, 0);
 	}
 
@@ -899,13 +1033,21 @@ private:
 			break;
 		case 5:
 			calibrationMode = 0;
-			saveSettings();
-			printf("Calibration completed. Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
 
-			if (abs(ctrlRegion.top - ctrlRegion.bottom) < 30) {
+			//Calculate thresholds
+			scrollThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom)/(ctrlRegion.top - ctrlRegion.bottom) * scrollThreshold_d;
+			appScrollThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom) / (ctrlRegion.top - ctrlRegion.bottom) * appScrollThreshold_d;
+			mouseThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom) / (ctrlRegion.top - ctrlRegion.bottom) * mouseThreshold_d;
+			
+
+			saveSettings();
+			printf("Calibration completed: Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
+			printf("New thresholds: %.4f %.4f %.4f \n", scrollThreshold, appScrollThreshold, mouseThreshold);
+
+			if (fabs(ctrlRegion.top - ctrlRegion.bottom) < 30) {
 				printf("WARNING: Cursor might move very fast due to vertical distance being less than 30. A value of around 40 is recommended.");
 			}
-			if (abs(ctrlRegion.right - ctrlRegion.left) < 30) {
+			if (fabs(ctrlRegion.right - ctrlRegion.left) < 30) {
 				printf("WARNING: Cursor might move very fast due to horizontal distance being less than 40. A value of around 60 is recommended.");
 			}
 			break;
@@ -955,12 +1097,26 @@ private:
 	}
 
 	void saveSettings() {
+		LONG retVal1, retVal2;
+
+		//If system-wide settings does not exist, try writing to it
+		if (hasSystemSettings != ERROR_SUCCESS)
+			retVal1 = saveSettingsReal(HKEY_LOCAL_MACHINE);
+
+		//Write to current user settings
+		retVal2 = saveSettingsReal(HKEY_CURRENT_USER);
+
+		printf("Save Settings. Return value: %d %d \n", retVal1, retVal2);
+		
+	}
+	
+	LONG saveSettingsReal(HKEY inKey) {
 		
 		LONG retVal1, retVal2, retVal3;
 		HKEY hKey;
 		DWORD dwDisp;
 
-		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, &dwDisp);
+		retVal1 = RegCreateKeyEx(inKey, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, &dwDisp);
 
 		retVal2 = writeFloatToReg(hKey, TEXT("scrollThreshold"), scrollThreshold);
 		retVal2 = writeFloatToReg(hKey, TEXT("appScrollThreshold"), appScrollThreshold);
@@ -975,7 +1131,7 @@ private:
 
 		retVal3 = RegCloseKey(hKey);
 
-		printf("Save Settings. Return value: %d %d %d \n", retVal1, retVal2, retVal3);
+		return max(max(retVal1, retVal2), retVal3);
 		
 	}
 
@@ -987,31 +1143,43 @@ private:
 
 	void readSettings() {
 
+		LONG retVal1, retVal2;
+
+		//First try reading settings from system-wide settings before reading from current user
+		hasSystemSettings = readSettingsReal(HKEY_LOCAL_MACHINE);
+		retVal2 = readSettingsReal(HKEY_CURRENT_USER);
+
+		printf("Read Settings: %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f \n",
+			hasSystemSettings, retVal2,
+			scrollThreshold, appScrollThreshold, mouseThreshold, curPosWeight, moveDelay,
+			ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.right);
+	}
+
+	LONG readSettingsReal(HKEY inKey) {
+
 		LONG retVal1, retVal2, retVal3;
 		HKEY hKey;
 		DWORD dwDisp;
 
-		retVal1 = RegCreateKeyEx(HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKey, &dwDisp);
+		retVal1 = RegCreateKeyEx(inKey, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKey, &dwDisp);
 
-		readFloatFromReg(hKey, TEXT("scrollThreshold"), &scrollThreshold);
-		readFloatFromReg(hKey, TEXT("appScrollThreshold"), &appScrollThreshold);
-		readFloatFromReg(hKey, TEXT("mouseThreshold"), &mouseThreshold);
-		readFloatFromReg(hKey, TEXT("curPosWeight"), &curPosWeight);
-		readFloatFromReg(hKey, TEXT("ctrlRegionT"), &ctrlRegion.top);
-		readFloatFromReg(hKey, TEXT("ctrlRegionB"), &ctrlRegion.bottom);
-		readFloatFromReg(hKey, TEXT("ctrlRegionL"), &ctrlRegion.left);
-		readFloatFromReg(hKey, TEXT("ctrlRegionR"), &ctrlRegion.right);
+		retVal2 = 5;
+		retVal2 = min(readFloatFromReg(hKey, TEXT("scrollThreshold"), &scrollThreshold), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("appScrollThreshold"), &appScrollThreshold), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("mouseThreshold"), &mouseThreshold), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("curPosWeight"), &curPosWeight), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("ctrlRegionT"), &ctrlRegion.top), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("ctrlRegionB"), &ctrlRegion.bottom),retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("ctrlRegionL"), &ctrlRegion.left), retVal2);
+		retVal2 = min(readFloatFromReg(hKey, TEXT("ctrlRegionR"), &ctrlRegion.right), retVal2);
 
-		retVal2 = readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay);
+		retVal2 = min(readDWORDFromReg(hKey, TEXT("moveDelay"), (DWORD*)&moveDelay), retVal2);
 
 		retVal3 = RegCloseKey(hKey);
 
 		calSettings();
 
-		printf("Read Settings: %d %d %d %.3f %.3f %.3f %.3f %d %.3f %.3f %.3f %.3f \n", 
-				retVal1, retVal2, retVal3,
-				scrollThreshold, appScrollThreshold, mouseThreshold, curPosWeight, moveDelay, 
-				ctrlRegion.top, ctrlRegion.bottom,ctrlRegion.left,ctrlRegion.right);
+		return max(max(retVal1, retVal2), retVal3);
 	}
 
 	LONG readFloatFromReg(HKEY hKey, LPTSTR subkey, float * vp){
@@ -1047,9 +1215,9 @@ private:
 		oldPos.x = -99999;
 		oldPos.y = -99999;
 		oldPos.z = -99999;
-		curPos.x = 0;
-		curPos.y = 0;
-		curPos.z = 0;
+		curPosNorm.x = 0;
+		curPosNorm.y = 0;
+		curPosNorm.z = 0;
 		avgPos.x = 0;
 		avgPos.y = 0;
 		avgPos.z = 0;
@@ -1073,28 +1241,27 @@ private:
 	}
 
 	void setupConsole() {
+
+		//always on top
+		myHWND = (myHWND == NULL ? GetConsoleWindow() : myHWND);
+		SetWindowPos(myHWND, HWND_TOPMOST, 0, 0,0,0, SWP_NOMOVE | SWP_NOSIZE);
+		
 		//Only show console window in debug build
 		#ifdef NDEBUG
 				hideMyself();
 		#endif
-		printf("Press [SELECT] to show or hide console. \n", numMoves);
-	}
-
-	void pairNewMoves() {
-		numMoves = move->pairMoves();
-		if (numMoves > 0) {
-			showMyself();
-			printf("%d controller(s) paired. \n", numMoves);
-			printf("Please pair the controller(s) in your Bluetooth settings.\n");
-		}
+		printf("Click [SELECT] to show console. Long click to hide. \n", numMoves);
 	}
 
 	void initCamera() {
 		//Do we have camera?
 		if (!move->initCamera(numMoves)) {
 			showMyself();
-			printf("No PS Eye Camera found. \n", numMoves);
-			tiltMode = true;
+			printf("No PS Eye Camera found. Closing in 5 seconds. \n", numMoves);
+			Sleep(5000);
+			closeTarget(myHWND);
+			//tiltMode = true;
+			
 		}
 	}
 
@@ -1113,20 +1280,22 @@ private:
 		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n",
 			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
 		//printf("TIME %d \n", fetchFileTime().QuadPart / 10000);
-		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, curPos.x, avgPos.y, curPos.y);
+		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, data.position.x, avgPos.y, data.position.y);
 		printPos = false;
 	}
 
 };
 
 
+//Move class
+MoveObserver* observer;
+
 
 int main(int argc, char* argv[])
 {
-	MoveObserver* observer = new MoveObserver();
+	observer = new MoveObserver();
 
 	getchar();
 	return 0;
 }
-
 
