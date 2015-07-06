@@ -1243,11 +1243,11 @@ private:
 			printf("Calibration completed: Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
 			printf("New thresholds: %.4f %.4f %.4f \n", scrollThreshold, appScrollThreshold, mouseThreshold);
 
-			if (fabs(ctrlRegion.top - ctrlRegion.bottom) < 30) {
-				printf("WARNING: Cursor might move very fast due to vertical distance being less than 30. A value of around 40 is recommended.");
+			if (fabs(ctrlRegion.top - ctrlRegion.bottom) < 20) {
+				printf("WARNING: Cursor might move very fast due to vertical distance being less than 20. A value of around 30 is recommended.");
 			}
 			if (fabs(ctrlRegion.right - ctrlRegion.left) < 30) {
-				printf("WARNING: Cursor might move very fast due to horizontal distance being less than 40. A value of around 60 is recommended.");
+				printf("WARNING: Cursor might move very fast due to horizontal distance being less than 30. A value of around 60 is recommended.");
 			}
 			break;
 		}
