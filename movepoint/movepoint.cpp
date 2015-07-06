@@ -1233,10 +1233,11 @@ private:
 			calibrationMode = 0;
 
 			//Calculate thresholds
+			/*//Since we now use raw data position for thresholds this is no longer necessary:
 			scrollThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom)/(ctrlRegion.top - ctrlRegion.bottom) * scrollThreshold_d;
 			appScrollThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom) / (ctrlRegion.top - ctrlRegion.bottom) * appScrollThreshold_d;
 			mouseThreshold = (ctrlRegion_d.top - ctrlRegion_d.bottom) / (ctrlRegion.top - ctrlRegion.bottom) * mouseThreshold_d;
-			
+			*/			
 
 			saveSettings();
 			printf("Calibration completed: Top:%.2f Bottom:%.2f Left:%.2f Right:%.2f \n", ctrlRegion.top, ctrlRegion.bottom, ctrlRegion.left, ctrlRegion.bottom);
