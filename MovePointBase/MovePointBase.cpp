@@ -21,6 +21,8 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 void				regDeviceNotification(HWND);
 _PROCESS_INFORMATION	startControllerProcess();
 DWORD WINAPI		TerminateApp(DWORD dwPID, DWORD dwTimeout);
+void				TerminateMovePoint();
+BOOL				MovePointStillRunning();
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -46,9 +48,11 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	}
 
 	//start controller process
-	controllerProcInfo = startControllerProcess();
-	//system("movepoint.exe");
-	//WinExec(TEXT("movepoint.exe"), SW_HIDE);	//If launched by WinExec would not access Eye Camera
+	if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
+		controllerProcInfo = startControllerProcess();
+	}
+	//system("movepoint.exe");							//system doesn't return a processId
+	//WinExec(TEXT("movepoint.exe"), SW_HIDE);			//If launched by WinExec would not access Eye Camera
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_MOVEPOINTBASE));
 
@@ -178,13 +182,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			switch (pHdr->dbch_devicetype)
 			{
 			case DBT_DEVTYP_DEVICEINTERFACE:
-				
+
 				//MessageBox(hWnd, pDevInf->dbcc_name, TEXT("WM"), MB_OK);
-				if (controllerProcInfo.dwProcessId == NULL) {
+				if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
 					controllerProcInfo = startControllerProcess();
 				}
-				//WinExec(TEXT("movepoint.exe"), SW_HIDE);		//If launched by WinExec would not access Eye Camera
-				//system("movepoint.exe");
 				
 				break;
 			default:
@@ -201,16 +203,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_ENDSESSION:
 		if (wParam == true) {
 			//shutting down
-			TerminateApp(controllerProcInfo.dwProcessId, 0);
-			ZeroMemory(&controllerProcInfo,sizeof(_PROCESS_INFORMATION));
+			TerminateMovePoint();
 		}
 		return DefWindowProc(hWnd, message, wParam, lParam);
 		break;
 	case WM_POWERBROADCAST:
 		if (wParam == PBT_APMSUSPEND) {
 			//System suspending
-			TerminateApp(controllerProcInfo.dwProcessId, 0);
-			ZeroMemory(&controllerProcInfo, sizeof(_PROCESS_INFORMATION));
+			TerminateMovePoint();
 		}
 		return DefWindowProc(hWnd, message, wParam, lParam);
 		break;
@@ -304,4 +304,24 @@ DWORD WINAPI TerminateApp(DWORD dwPID, DWORD dwTimeout)
 	CloseHandle(hProc);
 
 	return dwRet;
+}
+
+void TerminateMovePoint() {
+	TerminateApp(controllerProcInfo.dwProcessId, 0);
+	ZeroMemory(&controllerProcInfo, sizeof(_PROCESS_INFORMATION));
+}
+
+BOOL MovePointStillRunning()
+{
+	DWORD   dwRet;
+
+	GetExitCodeProcess(controllerProcInfo.hProcess, &dwRet);
+		
+	if (dwRet == STILL_ACTIVE) {
+		return true;
+	}
+	else {
+		return false;
+	}
+
 }

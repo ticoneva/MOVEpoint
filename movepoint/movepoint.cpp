@@ -16,11 +16,12 @@ class MoveObserver : public Move::IMoveObserver
 	float appScrollThreshold = 5;
 	float mouseThreshold = 0.2;
 	float curPosWeight = 0.4;
-	int moveDelay = 200; 
+	int moveDelay = 200;
 	int myMoveDelay, myScrollDelay;
 
 	//Position
 	RECT screenSize;
+	float screenWHratio;
 	RECTf ctrlRegion, ctrlRegion_d;
 	POINT cursorPos, winCurDiff;
 	Move::Vec3 oldPos, curPosNorm, avgPos;
@@ -28,17 +29,17 @@ class MoveObserver : public Move::IMoveObserver
 
 	//Timers
 	ULARGE_INTEGER	cur_FT,
-					lHandler_FT, mouseClick_FT, keyboardClick_FT,
-					squareHandler_FT, crossHandler_FT, triangleHandler_FT, circleHandler_FT,
-					psClick_FT, selectHandler_FT, startHandler_FT;
-	
+		lHandler_FT, mouseClick_FT, keyboardClick_FT,
+		squareHandler_FT, crossHandler_FT, triangleHandler_FT, circleHandler_FT,
+		psClick_FT, selectHandler_FT, startHandler_FT;
+
 	//Modes
 	bool controllerOn = true;
 	bool mouseMode = true;
 	bool scrollMode = false;
 	bool dragMode = false;
 	bool dragMode2 = false;
-	bool keyboardMode = false; 
+	bool keyboardMode = false;
 	bool appSwitchMode = false;
 	bool appSwitchMode2 = false;
 	bool zoomMode = false;
@@ -48,15 +49,15 @@ class MoveObserver : public Move::IMoveObserver
 
 	//Status
 	snapStatus snapped = SNAP_NONE;
-	bool targetClosed = false; 
-	
+	bool targetClosed = false;
+
 	bool squarePressed = false;
 	bool crossPressed = false;
 	bool trianglePressed = false;
 	bool circlePressed = false;
 	bool movePressed = false;
-	bool LPressed = false; 
-		
+	bool LPressed = false;
+
 	bool printPos = false;
 	bool takeInitReading = true;
 
@@ -72,11 +73,12 @@ class MoveObserver : public Move::IMoveObserver
 	HWND myHWND = 0;
 	WINDOWPLACEMENT myWPInfo;
 
-
 public:
 	MoveObserver()
 	{
 		setupConsole();					//setting up the console window
+
+		checkAdminRights();				//check if program has admin rights and prompt if not
 
 		initValues();					//intial values for variables
 		restoreDefaults();				//default settings
@@ -85,7 +87,7 @@ public:
 		move = Move::createDevice();
 		pairNewMoves();					//This pairs any unpaired controllers via USB
 		initializeSystem();
-		
+
 	}
 
 	int getNumMoves() {
@@ -106,6 +108,7 @@ public:
 		if (numMoves > 0) {
 			initCamera();					//Do we have camera?
 			move->subsribe(this);
+			ShowCursor(true);
 		}
 		else {
 			closeTarget(myHWND);
@@ -127,18 +130,18 @@ public:
 
 	void moveKeyPressed(int moveId, Move::MoveButton keyCode)
 	{
-		#ifdef DEBUG
-			printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
-		#endif
+#ifdef DEBUG
+		printf("MOVE id:%d   button pressed: %d\n", moveId, (int)keyCode);
+#endif
 		moveKeyProc(keyCode, 1);
-	
+
 	}
 
 	void moveKeyReleased(int moveId, Move::MoveButton keyCode)
 	{
-		#ifdef DEBUG
-			printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
-		#endif
+#ifdef DEBUG
+		printf("MOVE id:%d   button released: %d\n", moveId, (int)keyCode);
+#endif
 		moveKeyProc(keyCode, 0);
 	}
 
@@ -162,7 +165,7 @@ public:
 		if (takeInitReading) {
 			takeInitOrient(data);
 		}
-		
+
 		//Check if we are in calibration mode
 		if (calibrationMode > 0) {
 			calibrateRecordPos(data);
@@ -173,11 +176,11 @@ public:
 
 			//Check if we are in scroll mode
 			if (scrollMode && (double)(cur_FT.QuadPart - lHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId,data);
+				scroll(moveId, data);
 			}
 			//Check if we are in snap mode
-			else if (snapMode && (double)(cur_FT.QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-				scroll(moveId,data);
+			else if ((snapMode || desktopMode) && (double)(cur_FT.QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
+				scroll(moveId, data);
 			}
 			//Check if we are in mouse mode
 			else if ((mouseMode || dragMode || dragMode2) && (double)(cur_FT.QuadPart - mouseClick_FT.QuadPart) > myMoveDelay) {
@@ -190,7 +193,7 @@ public:
 				moveArrows(moveId, data);
 			}
 		}
-				
+
 		//Print position information
 		if (printPos) {
 			printDebugMessage(moveId, data);
@@ -230,66 +233,66 @@ private:
 		oFT.LowPart = myFT.dwLowDateTime;
 		return oFT;
 	}
-		
+
 	void moveKeyProc(Move::MoveButton keyCode, byte keyState)
-	{		
+	{
 		switch (keyCode)
 		{
-			case Move::B_NONE:
-				break;
-			case Move::B_T1:
-				break;
-			case Move::B_T2:
-				break;
+		case Move::B_NONE:
+			break;
+		case Move::B_T1:
+			break;
+		case Move::B_T2:
+			break;
 
-			case Move::B_TRIANGLE:
-				triangleHandler(keyState);
-				break;
+		case Move::B_TRIANGLE:
+			triangleHandler(keyState);
+			break;
 
-			case Move::B_CIRCLE:
-				circleHandler(keyState);
-				break;
+		case Move::B_CIRCLE:
+			circleHandler(keyState);
+			break;
 
-			case Move::B_CROSS:
-				crossHandler(keyState);
-				break;
+		case Move::B_CROSS:
+			crossHandler(keyState);
+			break;
 
-			case Move::B_SQUARE:
-				squareHandler(keyState);
-				break;
+		case Move::B_SQUARE:
+			squareHandler(keyState);
+			break;
 
-			case Move::B_SELECT:
-				selectHandler(keyState);
-				break;
+		case Move::B_SELECT:
+			selectHandler(keyState);
+			break;
 
-			case Move::B_START:
-				startHandler(keyState);
-				break;
+		case Move::B_START:
+			startHandler(keyState);
+			break;
 
-			case Move::B_STICK:
-					break;
-			case Move::B_UP:
-					break;
-			case Move::B_RIGHT:
-					break;
-			case Move::B_DOWN:
-					break;
-			case Move::B_LEFT:
-					break;
+		case Move::B_STICK:
+			break;
+		case Move::B_UP:
+			break;
+		case Move::B_RIGHT:
+			break;
+		case Move::B_DOWN:
+			break;
+		case Move::B_LEFT:
+			break;
 
-			case Move::B_PS:
-				psHandler(keyState);
-				break;
+		case Move::B_PS:
+			psHandler(keyState);
+			break;
 
-			case Move::B_MOVE:
-				moveHandler(keyState);
-				break;
+		case Move::B_MOVE:
+			moveHandler(keyState);
+			break;
 
-			case Move::B_T:
-				lHandler(keyState);
-				break;
+		case Move::B_T:
+			lHandler(keyState);
+			break;
 		}
-	
+
 	}
 
 	//Keypress subroutine
@@ -305,22 +308,22 @@ private:
 		}
 	}
 
-	void mousePress(byte button, byte keyState){
+	void mousePress(byte button, byte keyState) {
 
 		if (!controllerOn) return;
 
 		DWORD myMButton = -1;
 
 		switch (button) {
-			case 1:
-				myMButton = (keyState == 1 ? MOUSEEVENTF_LEFTDOWN: MOUSEEVENTF_LEFTUP);
-				break;
-			case 2:
-				myMButton = (keyState == 1 ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
-				break;
-			case 3:
-				myMButton = (keyState == 1 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
-				break;
+		case 1:
+			myMButton = (keyState == 1 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+			break;
+		case 2:
+			myMButton = (keyState == 1 ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
+			break;
+		case 3:
+			myMButton = (keyState == 1 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
+			break;
 		}
 
 		if (myMButton != -1) {
@@ -330,13 +333,13 @@ private:
 	}
 
 	//Mouse click subroutine
-	void mouseClick(byte button){
+	void mouseClick(byte button) {
 		mousePress(button, 1);
 		mousePress(button, 0);
 	}
 
 	//Keyboard click subroutine
-	void keyboardClick(byte bVk){
+	void keyboardClick(byte bVk) {
 		keyPress(bVk, 1);
 		keyPress(bVk, 0);
 	}
@@ -345,6 +348,18 @@ private:
 	void startHandler(byte keyState) {
 		if (!controllerOn) return;
 
+		//launch Windows on-screen keyboard
+		if (keyState == 0) {
+			if (amIAdmin()) {
+				system("%windir%\\system32\\osk.exe");
+			}
+			else {
+				showMyself();
+				printf("In order to use the onscreen keyboard, please launch movepoint with administrative privileges. \n");
+			}
+		}
+
+		/* Abondon keyboard mode for now
 		if (keyState == 1) {
 			if (!tiltMode) {
 				keyboardMode = true;
@@ -357,12 +372,13 @@ private:
 				mouseMode = true;
 			}
 		}
+		*/
 	}
 
 	//debug message
 	void selectHandler(byte keyState) {
 
-		if (keyState == 1){
+		if (keyState == 1) {
 			//Record time when button is pressed
 			selectHandler_FT = fetchFileTime();
 		}
@@ -388,46 +404,36 @@ private:
 
 		if (!controllerOn) return;
 
+		trianglePressed = (keyState == 1 ? true : false);
+
 		if (scrollMode) {
-			zoomMode = !zoomMode;
-			keyPress(VK_CONTROL, keyState);
+			zoomMode = (keyState == 1 ? true : false);
+			//keyPress(VK_CONTROL, keyState);
 		}
-		else {
-			if (mouseMode) {
-				mousePress(3, keyState);
-			}
-			else if (keyboardMode) {
-				keyPress(VK_TAB, keyState);
-			}
+		else if (mouseMode) {
+			mousePress(3, keyState);
 		}
+		else if (keyboardMode) {
+			keyPress(VK_TAB, keyState);
+		}
+
 	}
 
 	/*Circle maps to:
 		Mouse mode:		middle click
 		Keyboard mode:	Print screen
-		scroll mode:	
+		scroll mode:
 	*/
 	void circleHandler(byte keyState) {
 
 		if (!controllerOn) return;
 
-		if (keyState == 1) {
-			circlePressed = true;
-			circleHandler_FT = fetchFileTime();	//Record time when button is pressed
+		circlePressed = (keyState == 1 ? true : false);
+
+		if (scrollMode) {
+			snapMode = (keyState == 1 ? true : false);
 		}
-		else {
-			//Long click
-			if ((double)(fetchFileTime().QuadPart - circleHandler_FT.QuadPart) > myScrollDelay) {
-				if (snapped==SNAP_NONE) {
-
-				}
-			}
-			else {
-
-			}
-		}
-
-		if (mouseMode) {
+		else if (mouseMode) {
 			mousePress(2, keyState);
 		}
 		else if (keyboardMode) {
@@ -436,7 +442,7 @@ private:
 	}
 
 	/*Square maps to:
-		Mouse mode: 
+		Mouse mode:
 			click:		Win key
 			long-click:	show desktop/new desktop (Win10)
 		Keyboard mode:	Win key
@@ -444,22 +450,26 @@ private:
 	*/
 	void squareHandler(byte keyState) {
 
-		if (!controllerOn) return; 
+		if (!controllerOn) return;
 
-		if (keyState == 1){
+		if (keyState == 1) {
 			squarePressed = true;
 			squareHandler_FT = fetchFileTime();	//Record time when button is pressed
-
 			//In scroll mode, initiate Alt-Tab
 			if (scrollMode) {
 				appSwitchMode = true;
 				keyPress(VK_MENU, 1);
 				keyPress(VK_TAB, keyState);
 			}
-			else  {
-			//Long press square alone enables snap mode and show desktop.
-				snapMode = true;
-				myTarget = getTarget();
+			else {
+				//Long press square alone enables snap mode or desktop mode.
+				if (IsWindows10OrGreater) {
+					desktopMode = true;
+				}
+				else {
+					snapMode = true;
+					myTarget = getTarget();
+				}
 			}
 		}
 		else {
@@ -468,7 +478,7 @@ private:
 			if (appSwitchMode) {
 				//if we entered app switching with L button holding first, release tab
 				keyPress(VK_TAB, keyState);
-			} 
+			}
 			else if (appSwitchMode2) {
 				//if we entered app switching with square button holding first, release Alt
 				keyPress(VK_MENU, keyState);
@@ -478,7 +488,8 @@ private:
 			else {
 				//Long click
 				if ((double)(fetchFileTime().QuadPart - squareHandler_FT.QuadPart) > myScrollDelay) {
-					if (snapped==SNAP_NONE) {
+					/*Let's try not doing anything in a long click in this version
+					if (snapped == SNAP_NONE) {
 						if (IsWindows10OrGreater) {
 							newDesktop();
 						}
@@ -486,6 +497,7 @@ private:
 							showDesktop();	//if a snap hasn't occured, show desktop
 						}
 					}
+					*/
 				}
 				//Quick click
 				else {
@@ -493,6 +505,7 @@ private:
 				}
 
 				snapMode = false;
+				desktopMode = false;
 				snapped = SNAP_NONE;
 
 			}
@@ -508,7 +521,7 @@ private:
 
 		if (!controllerOn) return;
 
-		if (keyState == 1){
+		if (keyState == 1) {
 			crossPressed = true;
 			crossHandler_FT = fetchFileTime();	//Record time when button is pressed
 			if (squarePressed) {
@@ -522,9 +535,9 @@ private:
 
 			if ((double)(fetchFileTime().QuadPart - crossHandler_FT.QuadPart) > myScrollDelay) {
 				//long press
-				if (scrollMode){
+				if (scrollMode) {
 					//in scroll mode close app
-					closeTarget();
+					targetClosed = closeTarget();
 				}
 				else if (targetClosed) {
 					//If we closed a window, don't minimize the next one
@@ -571,7 +584,7 @@ private:
 			else {
 				//Quick click is interpreted as turning controller on or off
 				controllerOn = !controllerOn;
-				if (controllerOn) { 
+				if (controllerOn) {
 					mouseMode = true;
 					/* Can't use because close actions don't do anything
 					move->initMoves();
@@ -609,7 +622,7 @@ private:
 			//Exit drag mode when Move button is released
 			dragMode = false;
 			mouseMode = true;
-			
+
 		}
 		else if (dragMode2 && keyState == 0) {
 			dragMode2 = false;
@@ -625,7 +638,7 @@ private:
 				//If mouse mode is off, turn it on
 				mouseMode = true;
 			}
-			else{
+			else {
 				//If mouse mode is already on, send a left click
 				movePressed = (keyState == 1 ? true : false);
 				mousePress(1, keyState);
@@ -643,12 +656,12 @@ private:
 
 		if (!controllerOn) return;
 
-		if (keyState == 1){
+		if (keyState == 1) {
 			lHandler_FT = fetchFileTime(); //Record time when button is pressed
 
 			if (squarePressed) {
 				//app-switching if square is pressed first
-				appSwitchMode2 = true;	
+				appSwitchMode2 = true;
 				snapMode = false;		//disable snapping 
 				keyPress(VK_MENU, 1);
 				keyPress(VK_TAB, keyState);
@@ -667,22 +680,23 @@ private:
 		}
 		else {
 			scrollMode = false;
+			mouseMode = true;
 			if (appSwitchMode) {
 				//Exit app-switching (if L is pressed first)
 				keyPress(VK_MENU, 0);
 				appSwitchMode = false;
-				mouseMode = true;
 			}
 			else if (crossPressed) {
-				closeTarget();
+				//close target if cross button is already pressed
+				targetClosed = closeTarget();
 			}
-			else if (appSwitchMode2){
+			else if (appSwitchMode2) {
 				//app-switching if square is pressed first
 				keyPress(VK_TAB, keyState);
 			}
 			//Quick click maximizes or restores app window. 
 			else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
-					MaxRestoreTarget();		//Switch between maximized and regular app window
+				MaxRestoreTarget();		//Switch between maximized and regular app window
 			}
 		}
 	}
@@ -754,22 +768,30 @@ private:
 
 	//Scrolling subroutine
 	void scroll(int moveId, Move::MoveData data) {
+		//TO DO: Should give preference to up-down in scroll mode but left-right in desktop mode
+
 
 		if (!controllerOn) return;
 
 		//set the desirable movement threshold
 		float myThreshold = scrollThreshold;
-		if (appSwitchMode || zoomMode) {
+		if (appSwitchMode) {
 			myThreshold = appScrollThreshold;
 		}
-		else if (snapMode) {
-			myThreshold = appScrollThreshold * 1.5;
+		else if (snapMode || desktopMode|| zoomMode) {
+			myThreshold = appScrollThreshold * 1.5;		
 		}
 
 		//scroll up?
-		if (data.position.y > oldPos.y + myThreshold || data.position.y == 1) {
+		if (data.position.y > oldPos.y + myThreshold || data.position.y >= ctrlRegion.top) {
 			if (snapMode) {
 				snap(VK_UP);
+			}
+			else if (zoomMode) {
+				zoom(VK_UP);
+			}
+			else if (desktopMode) {
+				desktop(VK_UP);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
@@ -778,9 +800,15 @@ private:
 			updatePos(data);
 		}
 		//scroll down?
-		else if (data.position.y < oldPos.y - myThreshold || data.position.y == 0) {
+		else if (data.position.y < oldPos.y - myThreshold || data.position.y <= ctrlRegion.bottom) {
 			if (snapMode) {
 				snap(VK_DOWN);
+			}
+			else if (zoomMode) {
+				zoom(VK_DOWN);
+			}
+			else if (desktopMode) {
+				desktop(VK_DOWN);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
@@ -790,12 +818,15 @@ private:
 		}
 
 		//scroll left?
-		if (data.position.x < oldPos.x - myThreshold || data.position.x == 0) {
+		if (data.position.x < oldPos.x - myThreshold || data.position.x <= ctrlRegion.left) {
 			if (snapMode) {
 				snap(VK_LEFT);
 			}
+			else if (zoomMode) {
+				zoom(VK_LEFT);
+			}
 			else if (desktopMode) {
-				lastDesktop();
+				desktop(VK_LEFT);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
@@ -804,12 +835,15 @@ private:
 			updatePos(data);
 		}
 		//scroll right?
-		else if (data.position.x > oldPos.x + myThreshold || data.position.x == 1) {
+		else if (data.position.x > oldPos.x + myThreshold || data.position.x >= ctrlRegion.right) {
 			if (snapMode) {
 				snap(VK_RIGHT);
 			}
+			else if (zoomMode) {
+				zoom(VK_RIGHT);
+			}
 			else if (desktopMode) {
-				nextDesktop();
+				desktop(VK_RIGHT);
 			}
 			else {
 				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
@@ -824,7 +858,7 @@ private:
 		//Have we already snapped in this direction?
 		switch (keyCode) {
 			case VK_UP:
-				if (snapped == SNAP_UP) return ;
+				if (snapped == SNAP_UP) return ;		//This prevent multiple actions in one movement
 				snapped = SNAP_UP;
 				printf("Snapping up. \n");
 				break;
@@ -852,6 +886,80 @@ private:
 
 	}
 
+	void zoom(int keyCode) {
+		switch (keyCode) {
+		case VK_UP:
+			keyPress(VK_CONTROL, 1);
+			mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
+			keyPress(VK_CONTROL, 0);
+			printf("Zooming up. \n");
+			break;
+		case VK_DOWN:
+			keyPress(VK_CONTROL, 1);
+			mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+			keyPress(VK_CONTROL, 0);
+			printf("Zooming down. \n");
+			break;
+		case VK_LEFT:
+			if (snapped == SNAP_LEFT) return;		//This prevents multiple actions in one movement
+			snapped = SNAP_LEFT;
+			keyPress(VK_MENU, 1);
+			keyboardClick(keyCode);
+			keyPress(VK_MENU, 0);
+			printf("Back. \n");
+			break;
+		case VK_RIGHT:
+			if (snapped == SNAP_RIGHT) return;		
+			snapped = SNAP_RIGHT;
+			keyPress(VK_MENU, 1);
+			keyboardClick(keyCode);
+			keyPress(VK_MENU, 0);
+			printf("Forward. \n");
+			break;
+		}
+	}
+
+	void desktop(int keyCode) {
+		switch (keyCode) {
+		case VK_UP:
+			if (snapped == SNAP_UP) return;			//This prevents multiple actions in one movement
+			snapped = SNAP_UP;
+			newDesktop();
+#ifdef DEBUG
+			printf("new desktop. \n");
+#endif
+			break;
+
+		case VK_DOWN:
+			if (snapped == SNAP_DOWN) return;
+			snapped = SNAP_DOWN;
+			killDesktop();
+#ifdef DEBUG
+			printf("Kill desktop. \n");
+#endif
+			break;
+
+		case VK_LEFT:
+			if (snapped == SNAP_LEFT) return;
+			snapped = SNAP_LEFT;
+			nextDesktop();
+#ifdef DEBUG
+			printf("next desktop. \n");
+#endif
+			break;
+
+		case VK_RIGHT:
+			if (snapped == SNAP_RIGHT) return;
+			snapped = SNAP_RIGHT;
+			lastDesktop();
+#ifdef DEBUG
+			printf("last desktop. \n");
+#endif
+			break;
+		}
+	}
+
+
 	//Drag subroutine
 	void dragWindow(int moveId=0) {
 
@@ -866,6 +974,9 @@ private:
 	HWND getTarget() {
 		if (GetPhysicalCursorPos(&cursorPos)) {
 			return RealChildWindowFromPoint(GetDesktopWindow(), cursorPos);	//RealChildWindowFromPoint gives us the best guess as to which window is relevant	
+		}
+		else {
+			return NULL;
 		}
 	}
 	
@@ -898,13 +1009,14 @@ private:
 
 	}
 
-	void closeTarget(HWND cTarget = NULL) {
+	BOOL closeTarget(HWND cTarget = NULL) {
 		cTarget = (cTarget == NULL ? getTarget() : cTarget);
 		if (cTarget!=NULL) {
 			//Cannot use SendMessage because the thread will stop processing signals from controller
 			PostMessage(cTarget, WM_CLOSE, 0, 0);	
-			targetClosed = true;
+			return true;
 		}
+		return false;
 	}
 
 	BOOL minimizeTarget(HWND cTarget = NULL) {
@@ -916,6 +1028,8 @@ private:
 			printf("Windw minimized \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_MINIMIZE);
 		}
+
+		return false;
 	}
 
 	BOOL maximizeTarget(HWND cTarget = NULL) {
@@ -925,6 +1039,7 @@ private:
 			printf("Windw maximized. \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_MAXIMIZE);
 		}
+		return false;
 	}
 
 	BOOL restoreTarget(HWND cTarget = NULL) {
@@ -934,6 +1049,7 @@ private:
 			printf("Windw restored. \n");
 			return setShowCMD(cTarget, &tWPInfo, SW_RESTORE);
 		}
+		return false;
 	}
 
 	BOOL setShowCMD(HWND tHandle, WINDOWPLACEMENT * ptWP, UINT showCMD) {
@@ -941,6 +1057,7 @@ private:
 			(*ptWP).showCmd = showCMD;							//set showCMD value
 			return SetWindowPlacement(tHandle, ptWP);			//Set the new window placement info
 		}
+		return false;
 	}
 
 	BOOL MaxRestoreTarget() {
@@ -951,7 +1068,53 @@ private:
 				printf("Window resized. \n");
 				tWPInfo.showCmd = (tWPInfo.showCmd == SW_MAXIMIZE ? SW_RESTORE : SW_MAXIMIZE);
 				return SetWindowPlacement(cTarget, &tWPInfo);
-			}
+			} 
+		}
+		
+		return false;
+		
+	}
+
+	BOOL amIAdmin() {
+		HANDLE hToken;
+		OpenProcessToken(GetCurrentProcess(), TOKEN_READ, &hToken);
+
+		DWORD infoLen;
+		TOKEN_ELEVATION elevation;
+		GetTokenInformation(
+			hToken, TokenElevation,
+			&elevation, sizeof(elevation), &infoLen);
+		return (elevation.TokenIsElevated ? true : false);
+	}
+
+	BOOL RunAsAdmin(HWND hWnd, LPTSTR lpFile, LPTSTR lpParameters)
+	{
+		SHELLEXECUTEINFO   sei;
+		ZeroMemory(&sei, sizeof(sei));
+
+		sei.cbSize = sizeof(SHELLEXECUTEINFOW);
+		sei.hwnd = hWnd;
+		sei.fMask = SEE_MASK_FLAG_DDEWAIT | SEE_MASK_FLAG_NO_UI;
+		sei.lpVerb = _TEXT("runas");
+		sei.lpFile = lpFile;
+		sei.lpParameters = lpParameters;
+		sei.nShow = SW_SHOWNORMAL;
+
+		if (!ShellExecuteEx(&sei))
+		{
+			printf("Error: ShellExecuteEx failed 0x%x\n", GetLastError());
+			return FALSE;
+		}
+		return TRUE;
+	}
+
+	void checkAdminRights() {
+		if (!amIAdmin()) {
+			showMyself(10000);
+			printf("\n***\n");
+			printf("Movepoint is launched without administrative privileges. Controls will not work when the cursor is over applications with such privileges.*** \n");
+			printf("Hiding console window in 10 seconds. \n");
+			printf("***\n\n");
 		}
 	}
 
@@ -1206,11 +1369,13 @@ private:
 		return retVal;
 	}
 
+	//Default settings
 	void initValues() {
 		screenSize.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
 		screenSize.right = GetSystemMetrics(SM_CXVIRTUALSCREEN);
 		screenSize.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
 		screenSize.bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+		screenWHratio = abs(screenSize.left - screenSize.right) / abs(screenSize.bottom - screenSize.top);
 
 		oldPos.x = -99999;
 		oldPos.y = -99999;
@@ -1222,15 +1387,21 @@ private:
 		avgPos.y = 0;
 		avgPos.z = 0;
 
-		ctrlRegion_d.top = 20;
-		ctrlRegion_d.bottom = -20;
 		ctrlRegion_d.left = -30;
 		ctrlRegion_d.right = 30;
+		ctrlRegion_d.top = max(10,min(20,30/screenWHratio));			//default height between 1/3 to 2/3 of width
+		ctrlRegion_d.bottom = max(-10,min(-20,-30/screenWHratio));
 	}
 
 	//Restore size and position of console window
-	BOOL showMyself() {
+	BOOL showMyself(int showTime = -1) {
 		myHWND = (myHWND == NULL ? GetConsoleWindow() : myHWND);
+
+		//Do we need to hide the window after a specific interval?
+		if (showTime > 0) {
+			unsigned int thread_id = 0;
+			_beginthreadex(NULL, 0, hideMyself_T, &showTime, 0, &thread_id);
+		}
 		return setShowCMD(myHWND, &myWPInfo, SW_RESTORE);
 	}
 
@@ -1240,6 +1411,25 @@ private:
 		return setShowCMD(myHWND, &myWPInfo, SW_HIDE);
 	}
 
+	static unsigned int __stdcall hideMyself_T(void *p_thread_data)
+	{
+		int showTime = 0;
+		showTime = * static_cast<int*>(p_thread_data);
+		
+		Sleep(showTime);
+
+		//Do actual stuff
+		HWND hwHWND = GetConsoleWindow();
+		WINDOWPLACEMENT hmWPInfo;
+		if (GetWindowPlacement(hwHWND, &hmWPInfo)) {		//Get window placement info
+			hmWPInfo.showCmd = SW_HIDE;						//set showCMD value
+			SetWindowPlacement(hwHWND, &hmWPInfo);			//Set the new window placement info
+		}
+
+		return 0;
+	}
+
+	//Get the handle to the console window and hide it
 	void setupConsole() {
 
 		//always on top
@@ -1250,21 +1440,22 @@ private:
 		#ifdef NDEBUG
 				hideMyself();
 		#endif
-		printf("Click [SELECT] to show console. Long click to hide. \n", numMoves);
+		printf("Click [SELECT] to show console. Long click to hide. Close console to stop the controller. \n");
 	}
 
+	//Check for the presence of an PS Eye camera
 	void initCamera() {
-		//Do we have camera?
 		if (!move->initCamera(numMoves)) {
 			showMyself();
-			printf("No PS Eye Camera found. Closing in 5 seconds. \n", numMoves);
+			printf("No PS Eye Camera found. Closing in 5 seconds. \n");
 			Sleep(5000);
 			closeTarget(myHWND);
-			//tiltMode = true;
+			//tiltMode = true;			//It is possible to use just the orientation data to control the pointer
 			
 		}
 	}
 
+	//Print a debug message
 	void printDebugMessage(int moveId, Move::MoveData data) {
 		printf("MOVE id:%d   pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f   trigger:%d\n",
 			moveId,
@@ -1279,8 +1470,6 @@ private:
 		}
 		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n",
 			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
-		//printf("TIME %d \n", fetchFileTime().QuadPart / 10000);
-		//printf("MOVE pos:%.5f %.5f %.5f %.5f \n", avgPos.x, data.position.x, avgPos.y, data.position.y);
 		printPos = false;
 	}
 
@@ -1296,6 +1485,7 @@ int main(int argc, char* argv[])
 	observer = new MoveObserver();
 
 	getchar();
+
 	return 0;
 }
 
