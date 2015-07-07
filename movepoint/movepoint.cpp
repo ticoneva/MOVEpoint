@@ -713,9 +713,14 @@ private:
 				//close target if cross button is already pressed
 				targetClosed = closeTarget();
 			}
-			//Quick click maximizes or restores app window. 
+			//Quick click show task view in Win10, otherwise maximizes or restores app window. 
 			else if ((double)(fetchFileTime().QuadPart - lHandler_FT.QuadPart) <= myScrollDelay) {
-				MaxRestoreTarget();		//Switch between maximized and regular app window
+				if (IsWindows10OrGreater) {
+					showTaskView();			//launch task view
+				}
+				else {
+					MaxRestoreTarget();		//Switch between maximized and regular app window
+				}
 			}
 		}
 	}
@@ -1155,6 +1160,14 @@ private:
 		keyPress(VK_LWIN, 0);
 
 		printf("%d Desktop shown. \n", ++curConsoleLine);
+	}
+
+	void showTaskView() {
+		keyPress(VK_LWIN, 1);
+		keyboardClick(VK_TAB);		
+		keyPress(VK_LWIN, 0);
+
+		printf("%d Taskview shown. \n", ++curConsoleLine);
 	}
 
 	//only works for Windows 10
