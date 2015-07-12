@@ -12,11 +12,13 @@ class MoveObserver : public Move::IMoveObserver
 	int numMoves;
 
 	//Settings
+	float scrollPercent = 0.5;
 	float scrollThreshold = 1;
 	float appScrollThreshold = 5;
 	float mouseThreshold = 0.2;
 	float curPosWeight = 0.4;
 	int moveDelay = 200;
+	int autoThreshold = 250000;
 	int myMoveDelay, myScrollDelay;
 
 	//Position
@@ -28,7 +30,7 @@ class MoveObserver : public Move::IMoveObserver
 	Move::Quat avgOrient;
 
 	//Timers
-	ULARGE_INTEGER	cur_FT,
+	ULARGE_INTEGER	cur_FT, old_FT,
 		lHandler_FT, mouseClick_FT, keyboardClick_FT,
 		squareHandler_FT, crossHandler_FT, triangleHandler_FT, circleHandler_FT,
 		psClick_FT, selectHandler_FT, startHandler_FT;
@@ -218,6 +220,7 @@ private:
 		oldPos.x = data.position.x;
 		oldPos.y = data.position.y;
 		oldPos.z = data.position.z;
+		old_FT = fetchFileTime();
 	}
 
 	ULARGE_INTEGER fetchFileTime()
@@ -601,16 +604,10 @@ private:
 				controllerOn = !controllerOn;
 				if (controllerOn) {
 					mouseMode = true;
-					/* Can't use because close actions don't do anything
-					move->initMoves();
 					initCamera();
-					*/
 				}
 				else {
-					/*These doesn't seem to do anything
 					move->closeCamera();
-					move->closeMoves();
-					*/
 				}
 			}
 		}
@@ -795,9 +792,10 @@ private:
 		//TO DO: Should give preference to up-down in scroll mode but left-right in desktop mode
 
 		if (!controllerOn) return;
-
+		
 		//set the desirable movement threshold
-		float myThreshold = scrollThreshold;
+		DWORD myWDelta = floor(WHEEL_DELTA * scrollPercent + 0.5);  
+		float myThreshold = scrollThreshold * scrollPercent;
 		if (appSwitchMode) {
 			myThreshold = appScrollThreshold;
 		}
@@ -807,6 +805,10 @@ private:
 
 		//scroll up?
 		if (data.position.y > oldPos.y + myThreshold || data.position.y >= ctrlRegion.top) {
+
+			if (data.position.y >= ctrlRegion.top 
+				&& (double)(fetchFileTime().QuadPart - old_FT.QuadPart) <= autoThreshold / (1 + exp(-3 + data.position.y - ctrlRegion.top)))
+				return;	//Do nothing if the request is coming in too fast)
 
 			if (snapMode) {
 				if (oldPos.y < ctrlRegion.bottom) {
@@ -823,13 +825,18 @@ private:
 				desktop(VK_UP);
 			}
 			else {
-				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, WHEEL_DELTA, 0);
+				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 30, 0);
 				mouseMode = false;
 			}
 			updatePos(data);
 		}
 		//scroll down?
 		else if (data.position.y < oldPos.y - myThreshold || data.position.y <= ctrlRegion.bottom) {
+
+			if (data.position.y <= ctrlRegion.bottom
+				&& (double)(fetchFileTime().QuadPart - old_FT.QuadPart) <= autoThreshold / (1 + exp(-3 + ctrlRegion.bottom - data.position.y)))
+				return;	//Do nothing if the request is coming in too fast)
+
 			if (snapMode) {
 				if (oldPos.y > ctrlRegion.top) {
 					desktop(VK_DOWN);
@@ -845,7 +852,7 @@ private:
 				desktop(VK_DOWN);
 			}
 			else {
-				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+				mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -30, 0);
 				mouseMode = false;
 			}
 			updatePos(data);
@@ -853,6 +860,11 @@ private:
 		//scroll left?
 		else if (data.position.x < oldPos.x - myThreshold || data.position.x <= ctrlRegion.left) {
 			if (snapMode) {
+				
+				if (data.position.x <= ctrlRegion.left
+					&& (double)(fetchFileTime().QuadPart - old_FT.QuadPart) <= autoThreshold / (1 + exp(-3 + ctrlRegion.left - data.position.x)))
+					return;	//Do nothing if the request is coming in too fast)				
+				
 				if (oldPos.x > ctrlRegion.right) {
 					desktop(VK_LEFT);
 				}
@@ -867,13 +879,18 @@ private:
 				desktop(VK_LEFT);
 			}
 			else {
-				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -1 * WHEEL_DELTA, 0);
+				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -30, 0);
 				mouseMode = false;
 			}
 			updatePos(data);
 		}
 		//scroll right?
 		else if (data.position.x > oldPos.x + myThreshold || data.position.x >= ctrlRegion.right) {
+
+			if (data.position.x >= ctrlRegion.right
+				&& (double)(fetchFileTime().QuadPart - old_FT.QuadPart) <= autoThreshold / (1 + exp(-3 + data.position.x - ctrlRegion.right)))
+				return;	//Do nothing if the request is coming in too fast)		
+
 			if (snapMode) {
 				if (oldPos.x < ctrlRegion.left) {
 					desktop(VK_RIGHT);
@@ -889,7 +906,7 @@ private:
 				desktop(VK_RIGHT);
 			}
 			else {
-				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, WHEEL_DELTA, 0);
+				mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, 30, 0);
 				mouseMode = false;
 			}
 			updatePos(data);
@@ -1293,6 +1310,7 @@ private:
 
 	void restoreDefaults() {
 		ctrlRegion = ctrlRegion_d;
+		scrollPercent = scrollPercent_d;
 		scrollThreshold = scrollThreshold_d;
 		appScrollThreshold = appScrollThreshold_d;
 		mouseThreshold = mouseThreshold_d;
@@ -1330,6 +1348,7 @@ private:
 
 		retVal1 = RegCreateKeyEx(inKey, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, &dwDisp);
 
+		retVal2 = writeFloatToReg(hKey, TEXT("scrollPercent"), scrollPercent);
 		retVal2 = writeFloatToReg(hKey, TEXT("scrollThreshold"), scrollThreshold);
 		retVal2 = writeFloatToReg(hKey, TEXT("appScrollThreshold"), appScrollThreshold);
 		retVal2 = writeFloatToReg(hKey, TEXT("mouseThreshold"), mouseThreshold);
@@ -1376,6 +1395,8 @@ private:
 		retVal1 = RegCreateKeyEx(inKey, TEXT("SOFTWARE\\MOVEpoint"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKey, &dwDisp);
 
 		retVal2 = 5;
+		retVal2 = min(readFloatFromReg(hKey, TEXT("scrollPercent"), &scrollPercent), retVal2);
+		if (scrollPercent < 0.01) scrollPercent = scrollPercent_d;												//no negative value for scrollPercent
 		retVal2 = min(readFloatFromReg(hKey, TEXT("scrollThreshold"), &scrollThreshold), retVal2);
 		retVal2 = min(readFloatFromReg(hKey, TEXT("appScrollThreshold"), &appScrollThreshold), retVal2);
 		retVal2 = min(readFloatFromReg(hKey, TEXT("mouseThreshold"), &mouseThreshold), retVal2);

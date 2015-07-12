@@ -1,6 +1,7 @@
 namespace movepoint {
 
 	//Default values
+	const float scrollPercent_d = 0.5;			//How finely do we divide scrolling. 1 = one wheel click per scroll action.
 	const float scrollThreshold_d = 1;			//Threshold of movement before scrolling begins
 	const float appScrollThreshold_d = 5;		//Threshold of movement before scrolling begins in app-switching and zooming
 	const float mouseThreshold_d = 0.2;			//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
