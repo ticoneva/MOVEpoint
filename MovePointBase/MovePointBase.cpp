@@ -23,6 +23,7 @@ _PROCESS_INFORMATION	startControllerProcess();
 DWORD WINAPI		TerminateApp(DWORD dwPID, DWORD dwTimeout);
 void				TerminateMovePoint();
 BOOL				MovePointStillRunning();
+BOOL				duplicateExist();
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -32,9 +33,10 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
- 	// TODO: Place code here.
 	MSG msg;
 	HACCEL hAccelTable;
+
+	if (duplicateExist()) exit(0);
 
 	// Initialize global strings
 	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
@@ -340,5 +342,21 @@ BOOL MovePointStillRunning()
 	else {
 		return false;
 	}
+
+}
+
+BOOL duplicateExist() {
+	bool AlreadyRunning;
+
+	HANDLE hMutexOneInstance = CreateMutex(NULL, TRUE, _T("movepointbase-124712857"));
+
+	AlreadyRunning = (GetLastError() == ERROR_ALREADY_EXISTS);
+
+	if (hMutexOneInstance != NULL)
+	{
+		ReleaseMutex(hMutexOneInstance);
+	}
+
+	return AlreadyRunning;
 
 }
