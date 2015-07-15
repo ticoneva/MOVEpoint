@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
 		observer = new MoveObserver();
 
 		int count;
-		for (count = 1; count < argc; count++) {
+		for (count = 0; count < argc; count++) {
 			
 			std::string curArg(argv[count]);
 					

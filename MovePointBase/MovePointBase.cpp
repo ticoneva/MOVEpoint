@@ -10,6 +10,7 @@
 HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
+LPTSTR myLpCmdLine;
 _PROCESS_INFORMATION controllerProcInfo;		// the actual controller process
 HDEVNOTIFY hde;
 
@@ -38,6 +39,8 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	HACCEL hAccelTable;
 
 	if (duplicateExist()) exit(0);
+
+	myLpCmdLine = lpCmdLine;
 
 	// Initialize global strings
 	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
@@ -292,7 +295,7 @@ _PROCESS_INFORMATION startControllerProcess() {
 	_PROCESS_INFORMATION myProcInfo;
 	ZeroMemory(&myStartInfo, sizeof(STARTUPINFO));
 	myStartInfo.cb = sizeof(STARTUPINFO);
-	CreateProcess(TEXT("movepoint.exe"), NULL, NULL, NULL, false, 0, NULL, NULL, &myStartInfo, &myProcInfo);
+	CreateProcess(TEXT("movepoint.exe"), myLpCmdLine, NULL, NULL, false, 0, NULL, NULL, &myStartInfo, &myProcInfo);
 	return myProcInfo;
 }
 
