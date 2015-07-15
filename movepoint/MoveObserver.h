@@ -50,6 +50,8 @@ class MoveObserver : public Move::IMoveObserver
 	int moveDelay = 200;
 	int autoThreshold = 250000;
 	int myMoveDelay, myScrollDelay;
+	bool stableX = false;
+	bool stableY = false;
 
 	//Position
 	RECT screenSize;
@@ -119,6 +121,9 @@ public:
 	void navKeyPressed(int navId, Move::MoveButton keyCode);
 	void navKeyReleased(int navId, Move::MoveButton keyCode);
 	void navUpdated(int navId, Move::NavData data);
+
+	void extraStableX(BOOL stabilize);
+	void extraStableY(BOOL stabilize);
 
 private:
 	void updatePos(Move::MoveData data);

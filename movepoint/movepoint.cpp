@@ -28,6 +28,23 @@ int main(int argc, char* argv[])
 	if (!duplicateExist()) {
 		//only run if there isn't a duplicate
 		observer = new MoveObserver();
+
+		int count;
+		for (count = 1; count < argc; count++) {
+			
+			std::string curArg(argv[count]);
+					
+			if (curArg == "-sx") {
+				observer->extraStableX(true);
+				printf("Command line settings: Extra stable X \n");
+			}
+			else if (curArg == "-sy") {
+				observer->extraStableY(true);
+				printf("Command line settings: Extra stable Y \n");
+			}
+		}
+
+
 		getchar();
 
 	}

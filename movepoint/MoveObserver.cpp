@@ -138,6 +138,13 @@
 		printf("NAV id:%d   trigger1: %d,  trigger2: %d, stick: %d,%d\n", navId, data.trigger1, data.trigger2, data.stickX, data.stickY);
 	}
 
+	void MoveObserver::extraStableX(BOOL stabilize) {
+		stableX = stabilize;
+	}
+	void MoveObserver::extraStableY(BOOL stabilize) {
+		stableY = stabilize;
+	}
+
 	void MoveObserver::updatePos(Move::MoveData data)
 	{
 		oldPos.x = data.position.x;
@@ -617,12 +624,14 @@
 
 		if (!controllerOn) return;
 
-		float xPosWeight, yPosWeight;
+		float xPosWeight, yPosWeight, distWeight;
+
+		distWeight = min(1, max(0, (1 / log(max(fabs(data.position.x), fabs(data.position.y)) + 2))*max(1,data.position.z/70)));
 
 		if (!tiltMode) {
 
-			xPosWeight = min(fabs(data.position.x - avgPos.x) / mouseThreshold, 1);
-			yPosWeight = min(fabs(data.position.y - avgPos.y) / mouseThreshold, 1);
+			xPosWeight = max(min(fabs(data.position.x - avgPos.x) / mouseThreshold * (stableX ? distWeight : 1), 1), 0);
+			yPosWeight = max(min(fabs(data.position.y - avgPos.y) / mouseThreshold * (stableY ? distWeight : 1), 1), 0);
 
 			cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPosNorm.x * screenSize.right + screenSize.left));
 			cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPosNorm.y * screenSize.bottom + screenSize.top));

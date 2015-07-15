@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <tchar.h>
+#include <string>
 #include "windows.h"
 
 #include "IMoveManager.h"
