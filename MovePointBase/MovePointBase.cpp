@@ -174,24 +174,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		PostQuitMessage(0);
 		break;
 	case WM_DEVICECHANGE:
-		if (DBT_DEVICEARRIVAL == wParam)
+		if (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE)
 		{
 			PDEV_BROADCAST_HDR pHdr = (PDEV_BROADCAST_HDR)lParam;
 			PDEV_BROADCAST_DEVICEINTERFACE pDevInf = (PDEV_BROADCAST_DEVICEINTERFACE)pHdr;
 
-			switch (pHdr->dbch_devicetype)
-			{
-			case DBT_DEVTYP_DEVICEINTERFACE:
+			//MessageBox(hWnd, pDevInf->dbcc_name, TEXT("WM"), MB_OK);
 
-				//MessageBox(hWnd, pDevInf->dbcc_name, TEXT("WM"), MB_OK);
-				if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
-					controllerProcInfo = startControllerProcess();
+			std::string dbcc(pDevInf->dbcc_name);
+			std::transform(dbcc.begin(), dbcc.end(), dbcc.begin(), ::tolower);
+			std::size_t vidPos = dbcc.find("vid_");
+			std::size_t pidPos = dbcc.find("pid_");
+			std::string vid, pid;
+
+			if (vidPos != std::string::npos && pidPos != std::string::npos) {
+				vid = dbcc.substr(vidPos+4, 4);
+				pid = dbcc.substr(pidPos+4, 4);
+				//std::string tid = vid + " " + pid;
+				//MessageBox(hWnd, tid.c_str(), TEXT("WM"), MB_OK);
+			}
+
+			//Is the device a Move controller?
+			if ((vid=="8888" && pid=="0508") || (vid=="054c" && pid=="03d5")) {
+				if (wParam == DBT_DEVICEARRIVAL) {
+					if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
+						controllerProcInfo = startControllerProcess();
+					}
 				}
-				
-				break;
-			default:
+				else if (wParam == DBT_DEVICEREMOVECOMPLETE) {
+					TerminateMovePoint();
+				}
+			}
+			else {
 				return DefWindowProc(hWnd, message, wParam, lParam);
 			}
+
 		}
 		else {
 			return DefWindowProc(hWnd, message, wParam, lParam);
@@ -201,7 +218,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	//Move controllers sleep pretty much immediately after system suspend, 
 	//so we can simply terminate the actual controller thread
 	case WM_ENDSESSION:
-		if (wParam == true) {
+		if (wParam == TRUE) {
 			//shutting down
 			TerminateMovePoint();
 		}
