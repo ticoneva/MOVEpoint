@@ -11,7 +11,7 @@ HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
 _PROCESS_INFORMATION controllerProcInfo;		// the actual controller process
-
+HDEVNOTIFY hde;
 
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
@@ -19,6 +19,7 @@ BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 void				regDeviceNotification(HWND);
+void				startController();
 _PROCESS_INFORMATION	startControllerProcess();
 DWORD WINAPI		TerminateApp(DWORD dwPID, DWORD dwTimeout);
 void				TerminateMovePoint();
@@ -50,9 +51,7 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	}
 
 	//start controller process
-	if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
-		controllerProcInfo = startControllerProcess();
-	}
+	startController();
 	//system("movepoint.exe");							//system doesn't return a processId
 	//WinExec(TEXT("movepoint.exe"), SW_HIDE);			//If launched by WinExec would not access Eye Camera
 
@@ -129,6 +128,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    //Register to get device messages
    regDeviceNotification(hWnd);
 
+   //Register to get session messages
+   WTSRegisterSessionNotification(hWnd, NOTIFY_FOR_THIS_SESSION);
 
    return TRUE;
 }
@@ -152,7 +153,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 	case WM_COMMAND:
-		wmId    = LOWORD(wParam);
+		wmId = LOWORD(wParam);
 		wmEvent = HIWORD(wParam);
 		// Parse the menu selections:
 		switch (wmId)
@@ -173,7 +174,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		EndPaint(hWnd, &ps);
 		break;
 	case WM_DESTROY:
+		UnregisterDeviceNotification(hde);
 		PostQuitMessage(0);
+		break;
+	case WM_WTSSESSION_CHANGE:
+		if (wParam == WTS_SESSION_LOCK || wParam == WTS_CONSOLE_DISCONNECT) {
+			TerminateMovePoint();
+		}
+		
+		if (wParam == WTS_SESSION_UNLOCK || wParam == WTS_CONSOLE_CONNECT) {
+			startController();
+		}
 		break;
 	case WM_DEVICECHANGE:
 		if (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE)
@@ -199,9 +210,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			//Is the device a Move controller?
 			if ((vid=="8888" && pid=="0508") || (vid=="054c" && pid=="03d5")) {
 				if (wParam == DBT_DEVICEARRIVAL) {
-					if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
-						controllerProcInfo = startControllerProcess();
-					}
+					startController();
 				}
 				else if (wParam == DBT_DEVICEREMOVECOMPLETE) {
 					TerminateMovePoint();
@@ -260,14 +269,22 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 }
 
 void regDeviceNotification(HWND hWnd) {
+	
+	//Receive HID device info
 	GUID GUID_DEVINTERFACE_HID = { 0x4D1E55B2, 0xF16F, 0x11CF,{ 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
-
 	DEV_BROADCAST_DEVICEINTERFACE NotificationFilter;
 	ZeroMemory(&NotificationFilter, sizeof(NotificationFilter));
 	NotificationFilter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
 	NotificationFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
 	NotificationFilter.dbcc_classguid = GUID_DEVINTERFACE_HID;
-	RegisterDeviceNotification(hWnd, &NotificationFilter, DEVICE_NOTIFY_WINDOW_HANDLE);
+	hde = RegisterDeviceNotification(hWnd, &NotificationFilter, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+}
+
+void startController() {
+	if (controllerProcInfo.dwProcessId == NULL || !MovePointStillRunning()) {
+		controllerProcInfo = startControllerProcess();
+	}
 }
 
 _PROCESS_INFORMATION startControllerProcess() {

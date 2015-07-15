@@ -22,5 +22,5 @@
 #include <WinUser.h>
 #include <VersionHelpers.h>
 #include <Dbt.h>
-
+#include <Wtsapi32.h>
 
