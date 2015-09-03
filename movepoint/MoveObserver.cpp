@@ -312,7 +312,7 @@
 		circlePressed = (keyState == 1 ? true : false);
 		if (keyState == 1) circleHandler_FT = fetchFileTime();	//Record time when button is pressed
 
-																/******Custom stuff******************/
+		/******Custom stuff******************/
 		if (scrollMode || desktopMode) {
 			if (keyState == 1) {
 				desktopMode = true;
@@ -490,6 +490,7 @@
 
 		/******Standard button routines******/
 		if (!controllerOn) return;
+		movePressed = (keyState == 1 ? true : false);
 		if (keyState == 1) {
 			moveHandler_FT = fetchFileTime();				//Record time when button is pressed
 			updatePos(move->getMove(0)->getMoveData());		//Record position
@@ -529,7 +530,6 @@
 			}
 			else {
 				//If mouse mode is already on, send a left click
-				movePressed = (keyState == 1 ? true : false);
 				mousePress(1, keyState);
 			}
 		}
@@ -636,8 +636,10 @@
 			cursorPos.x = round((1 - xPosWeight) * cursorPos.x + xPosWeight * (curPosNorm.x * screenSize.right + screenSize.left));
 			cursorPos.y = round((1 - yPosWeight) * cursorPos.y + yPosWeight * (curPosNorm.y * screenSize.bottom + screenSize.top));
 
-			SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
+			mouse_event(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE, cursorPos.x, cursorPos.y, 0, 0);
 
+			//SetPhysicalCursorPos doesn't work for handwritting
+			//SetPhysicalCursorPos(cursorPos.x, cursorPos.y);
 		}
 		else {
 			moveCursorTilt(moveId, data);
@@ -1154,6 +1156,11 @@
 		screenSize.bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 		screenWHratio = abs(screenSize.left - screenSize.right) / abs(screenSize.bottom - screenSize.top);
 
+		screenSize.left = round(screenSize.left * 65535 / GetSystemMetrics(SM_CXSCREEN));
+		screenSize.right = round(screenSize.right * 65535 / GetSystemMetrics(SM_CXSCREEN));
+		screenSize.top = round(screenSize.top * 65535 / GetSystemMetrics(SM_CYSCREEN));
+		screenSize.bottom = round(screenSize.bottom * 65535 / GetSystemMetrics(SM_CYSCREEN));
+
 		oldPos.x = -99999;
 		oldPos.y = -99999;
 		oldPos.z = -99999;
@@ -1234,6 +1241,9 @@
 
 	//Print a debug message
 	void MoveObserver::printDebugMessage(int moveId, Move::MoveData data) {
+
+		POINT debugCurPos;
+
 		printf("MOVE id:%d   pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f   trigger:%d\n",
 			moveId,
 			data.position.x, data.position.y, data.position.z,
@@ -1242,8 +1252,8 @@
 		printf("AVG NORMALIZED pos:%.2f %.2f %.2f   ori:%.2f %.2f %.2f %.2f\n",
 			avgPos.x, avgPos.y, avgPos.z,
 			avgOrient.w, avgOrient.v.x, avgOrient.v.y, avgOrient.v.z);
-		if (GetPhysicalCursorPos(&cursorPos)) {
-			printf("CURSOR pos:%d %d\n", cursorPos.x, cursorPos.y);
+		if (GetPhysicalCursorPos(&debugCurPos)) {
+			printf("CURSOR pos:%d %d\n", debugCurPos.x, debugCurPos.y);
 		}
 		printf("SCREEN left:%d  right:%d top:%d bottom:%d\n",
 			screenSize.left, screenSize.right, screenSize.top, screenSize.bottom);
