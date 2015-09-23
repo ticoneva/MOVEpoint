@@ -22,7 +22,7 @@ const float scrollThreshold_d = 1;			//Threshold of movement before scrolling be
 const float appScrollThreshold_d = 5;		//Threshold of movement before scrolling begins in app-switching and zooming
 const float mouseThreshold_d = 0.2;			//Threshold of movement before cursor moves 1:1 with handset. For reducing cursor jitter.
 const float curPosWeight_d = 0.4;			//Weight of current handset position in calculating moving average. For reducing cursor jitter.
-const int moveDelay_d = 0;				//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
+const int moveDelay_d = 0;					//Time to wait before executing press event in milliseconds. For reducing cursor shake while pressing button.
 
 enum snapStatus
 {

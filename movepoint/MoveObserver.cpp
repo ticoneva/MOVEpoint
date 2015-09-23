@@ -900,8 +900,10 @@
 		if (!controllerOn) return;
 
 		BOOL retVal;
+		POINT myCurPPos;
 
-		retVal = MoveWindow(myTarget, cursorPos.x - winCurDiff.x, cursorPos.y - winCurDiff.y, tSize.x, tSize.y, true);
+		GetPhysicalCursorPos(&myCurPPos);
+		retVal = MoveWindow(myTarget, myCurPPos.x - winCurDiff.x, myCurPPos.y - winCurDiff.y, tSize.x, tSize.y, true);
 	}
 
 	//Get handle to the window below cursor and send it to foreground
@@ -928,8 +930,11 @@
 			tSize.x = (tRect.right - tRect.left);								//Calculate distance from cursor
 			tSize.y = (tRect.bottom - tRect.top);
 
-			winCurDiff.x = cursorPos.x - tRect.left;							//This difference is kept while dragging
-			winCurDiff.y = cursorPos.y - tRect.top;
+			POINT myCurPPos;
+			GetPhysicalCursorPos(&myCurPPos);
+
+			winCurDiff.x = myCurPPos.x - tRect.left;							//This difference is kept while dragging
+			winCurDiff.y = myCurPPos.y - tRect.top;
 
 			//printf("HWND:%d %d %d %d %d %d %d \n", myTarget, tRect.left, tRect.top, tSize.x, tSize.y, winCurDiff.x, winCurDiff.y);
 		}
@@ -1062,7 +1067,7 @@
 	void MoveObserver::calSettings() {
 		if (mouseThreshold <= 0) mouseThreshold = 0.000001;
 		myMoveDelay = moveDelay * 10000;						//movement detection delay in nanoseconds
-		myScrollDelay = (moveDelay + 100) * 10000;				//scroll needs slightly more delay
+		myScrollDelay = max((moveDelay + 100),300) * 10000;				//scroll needs slightly more delay
 	}
 
 	void MoveObserver::saveSettings() {
